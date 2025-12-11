@@ -1,0 +1,59 @@
+{
+  "gemini_model": "gemini-2.0-flash-exp",
+  "settings": {
+    "background_color": "#FFFFFF",
+    "balloon_image": "assets/balloon.png",
+    "font_path": "arial.ttf",
+    "text_color": "#000000",
+    "font_size": 50
+  },
+  "narrator": {
+    "voice_params": {
+      "language_code": "en-US",
+      "name": "en-US-Journey-D",
+      "ssml_gender": "MALE"
+    }
+  },
+  "characters": {
+    "Herbert Walker": {
+      "image": "assets/herbert.png",
+      "voice_params": {
+        "language_code": "en-US",
+        "name": "en-US-Neural2-D",
+        "ssml_gender": "MALE"
+      }
+    },
+    "Margot Walker": {
+      "image": "assets/margot.png",
+      "voice_params": {
+        "language_code": "en-US",
+        "name": "en-US-Neural2-F",
+        "ssml_gender": "FEMALE"
+      }
+    },
+    "Brian Walker": {
+      "image": "assets/brian.png",
+      "voice_params": {
+        "language_code": "en-US",
+        "name": "en-US-Neural2-I",
+        "ssml_gender": "MALE"
+      }
+    },
+    "Laura Walker": {
+      "image": "assets/laura.png",
+      "voice_params": {
+        "language_code": "en-US",
+        "name": "en-US-Neural2-H",
+        "ssml_gender": "FEMALE"
+      }
+    },
+    "Molly Walker": {
+      "image": "assets/molly.png",
+      "voice_params": {
+        "language_code": "en-US",
+        "name": "en-US-Neural2-E",
+        "ssml_gender": "FEMALE"
+      }
+    }
+  }
+}
