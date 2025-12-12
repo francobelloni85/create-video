@@ -4,3 +4,5 @@ google-cloud-texttospeech
 pillow
 ffmpeg-python
 python-dotenv
+mutagen
+mutagen

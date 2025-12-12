@@ -8,6 +8,12 @@ load_dotenv()
 
 # Load configuration
 import google.generativeai as genai
+from google.cloud import texttospeech
+from mutagen.mp3 import MP3
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
+import textwrap
+import uuid
+import ffmpeg
 
 # Load configuration
 def load_config():
@@ -102,16 +108,456 @@ def get_active_roster(parsed_script):
     
     for line in parsed_script:
         speaker = line.get('speaker')
-        if speaker and speaker != "Narrator":
-            # Robustness check: try to find close matches or just accept if mapped correctly
-            if speaker in valid_characters:
-                roster.add(speaker)
-            else:
-                # Optional: Handle unknown characters or fuzzy match
-                # For now, just warn and strict filter
-                st.warning(f"Warning: Unknown character '{speaker}' detected.")
+        if speaker:
+            start_speaker = speaker.strip()
+            if start_speaker != "Narrator" and start_speaker in valid_characters:
+                roster.add(start_speaker)
     
     return list(roster)
+
+def generate_single_audio(text, speaker, index):
+    """
+    Step 2a: Generate Audio
+    - Uses Google Cloud TTS
+    - Returns filename and duration
+    """
+    # Ensure output directory exists
+    output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Init Client logic checks
+    if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+        # Just a warning, it might be in system env
+        pass
+
+    try:
+        client = texttospeech.TextToSpeechClient()
+    except Exception as e:
+        st.error(f"Failed to initialize TTS client: {e}")
+        return None, 0.0
+
+    # Determine Voice Params
+    voice_params = None
+    if speaker == "Narrator":
+        voice_params = config.get('narrator', {}).get('voice_params')
+    else:
+        # Check specific character
+        char_config = config.get('characters', {}).get(speaker)
+        if char_config:
+            voice_params = char_config.get('voice_params')
+
+    if not voice_params:
+        # Fallback to Narrator if character not found 
+        voice_params = config.get('narrator', {}).get('voice_params') 
+    
+    if not voice_params:
+         st.error(f"Critical: No voice params found for {speaker} and no default narrator config.")
+         return None, 0.0
+
+    # Prepare Request
+    synthesis_input = texttospeech.SynthesisInput(text=text)
+    
+    # Select Voice
+    gender_map = {
+        "MALE": texttospeech.SsmlVoiceGender.MALE,
+        "FEMALE": texttospeech.SsmlVoiceGender.FEMALE,
+        "NEUTRAL": texttospeech.SsmlVoiceGender.NEUTRAL
+    }
+    gender_str = voice_params.get("ssml_gender", "MALE")
+    gender_enum = gender_map.get(gender_str, texttospeech.SsmlVoiceGender.MALE)
+
+    voice = texttospeech.VoiceSelectionParams(
+        language_code=voice_params.get("language_code", "en-US"),
+        name=voice_params.get("name"),
+        ssml_gender=gender_enum
+    )
+
+    # Select Audio Config
+    audio_config = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.MP3
+    )
+
+    try:
+        response = client.synthesize_speech(
+            input=synthesis_input, voice=voice, audio_config=audio_config
+        )
+    except Exception as e:
+        st.error(f"TTS API Error for {speaker}: {e}")
+        return None, 0.0
+
+    # Save File
+    # output/audio_{index}.mp3
+    filename = f"audio_{index}.mp3"
+    filepath = os.path.join(output_dir, filename)
+    
+    filepath = os.path.abspath(filepath) 
+
+    with open(filepath, "wb") as out:
+        out.write(response.audio_content)
+        
+    # Get Duration
+    try:
+        audio = MP3(filepath)
+        duration = audio.info.length
+    except Exception as e:
+        st.warning(f"Could not determine duration for {filepath}: {e}")
+        duration = 0.0
+        
+    return filepath, duration
+
+def generate_audio(parsed_script):
+    """
+    2. Audio Generation Logic
+    Generates TTS audio for each line using Google Cloud TTS.
+    """
+    st.info("Initializing TTS Client...")
+    
+    updated_script = []
+    
+    total_lines = len(parsed_script)
+    progress_bar = st.progress(0)
+    
+    for i, line in enumerate(parsed_script):
+        speaker = line.get('speaker')
+        text = line.get('text')
+        
+        if not speaker or not text:
+            updated_script.append(line)
+            continue
+            
+        # Call helper
+        filepath, duration = generate_single_audio(text, speaker, i)
+        
+        if filepath:
+            line['audio_file'] = filepath
+            line['audio_path'] = filepath # Setting both for compatibility
+            line['duration'] = duration
+        
+        updated_script.append(line)
+        progress_bar.progress((i + 1) / total_lines)
+            
+    return updated_script
+
+def generate_frames(parsed_script, roster):
+    """
+    3. Visual Generation Logic (Vertical Ensemble)
+    """
+    st.info("Step 3: Generating Visuals...")
+    
+    output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 1. Config & Assets Setup
+    video_width = 1080
+    video_height = 1920
+    bg_color = config['settings'].get('background_color', '#FFFFFF')
+    
+    # Load Font
+    font_path = config['settings'].get('font_path', 'arial.ttf')
+    try:
+        # Try loading font, fallback to default if fails
+        font = ImageFont.truetype(font_path, config['settings'].get('font_size', 50))
+    except IOError:
+        st.warning(f"Could not load font {font_path}, using default.")
+        font = ImageFont.load_default()
+
+    # Load Balloon
+    balloon_path = config['settings'].get('balloon_image', 'assets/balloon.png')
+    try:
+        balloon_img = Image.open(balloon_path).convert("RGBA")
+        # Resize balloon to fit width with some padding
+        b_target_width = int(video_width * 0.9)
+        b_ratio = b_target_width / balloon_img.width
+        b_target_height = int(balloon_img.height * b_ratio)
+        balloon_img = balloon_img.resize((b_target_width, b_target_height), Image.Resampling.LANCZOS)
+    except FileNotFoundError:
+        st.error(f"Balloon image not found at {balloon_path}")
+        return parsed_script
+
+    # 2. Pre-load and Normalize Roster Images (Safeguard 1)
+    target_char_height = 900
+    roster_images = {}
+    
+    for char_name in roster:
+        # Look up image path in config
+        char_conf = config['characters'].get(char_name)
+        if char_conf and 'image' in char_conf:
+            img_path = char_conf['image']
+            try:
+                img = Image.open(img_path).convert("RGBA")
+                
+                # Resize maintaining aspect ratio
+                width_percent = (target_char_height / float(img.size[1]))
+                new_width = int((float(img.size[0]) * float(width_percent)))
+                img = img.resize((new_width, target_char_height), Image.Resampling.LANCZOS)
+                
+                roster_images[char_name] = img
+            except Exception as e:
+                st.warning(f"Could not load image for {char_name}: {e}")
+        else:
+            st.warning(f"No image config found for {char_name}")
+
+    if not roster_images:
+        st.error("No character images loaded! Check assets.")
+        return parsed_script
+
+    total_lines = len(parsed_script)
+    progress_bar = st.progress(0)
+
+    # --- Vertical Layout Calculation (Center-Out) ---
+    BUFFER_SPACE = 50
+    # Total height = Balloon + Buffer + Character (normalized)
+    total_stack_height = balloon_img.height + BUFFER_SPACE + target_char_height
+    
+    # Calculate Top Y to center the whole stack
+    balloon_y = (video_height - total_stack_height) // 2
+    
+    # Character starts below balloon + buffer
+    char_y_top = balloon_y + balloon_img.height + BUFFER_SPACE
+
+
+    # 3. Generate Frames Loop
+    for i, line in enumerate(parsed_script):
+        speaker = line.get('speaker')
+        text_content = line.get('text', "")
+        
+        # Create Canvas
+        frame = Image.new('RGBA', (video_width, video_height), bg_color)
+        
+        # --- Stage Layer (Bottom) ---
+        # Safeguard 2: Distribute evenly
+        num_chars = len(roster)
+        if num_chars > 0:
+            # Calculate positions
+            # Divide width into slots
+            slot_width = video_width // num_chars
+            
+            # Max width per character (leave some margin)
+            max_char_width = int(slot_width * 0.95)
+            
+            for idx, char_name in enumerate(roster):
+                if char_name not in roster_images:
+                    continue
+                
+                char_img = roster_images[char_name].copy()
+                
+                # Resize if wider than slot
+                if char_img.width > max_char_width:
+                     ratio = max_char_width / float(char_img.width)
+                     new_h = int(char_img.height * ratio)
+                     char_img = char_img.resize((max_char_width, new_h), Image.Resampling.LANCZOS)
+
+                # Safeguard 3: Opacity Logic
+                # If Narrator is speaking, EVERYONE is 50%
+                # If Character is speaking, they are 100%, others 50%
+                is_active = (speaker == char_name)
+                is_narrator = (speaker == "Narrator")
+                
+                if is_narrator or not is_active:
+                     # Reduce opacity to 50%
+                     # Get alpha channel, multiply by 0.5
+                     alpha = char_img.split()[3]
+                     alpha = alpha.point(lambda p: p * 0.5)
+                     char_img.putalpha(alpha)
+                
+                # Safeguard 2: Layout (Center-Out)
+                # Calculate center of the slot
+                slot_center_x = (idx * slot_width) + (slot_width // 2)
+                
+                # Position image relative to the calculated char_y_top
+                img_w, img_h = char_img.size
+                paste_x = slot_center_x - (img_w // 2)
+                
+                # Align top of character to the calculated line:
+                paste_y = char_y_top
+
+                # Paste
+                frame.paste(char_img, (paste_x, paste_y), char_img)
+
+        # --- Dialogue Layer (Top) ---
+        # 1. Draw Order (CRITICAL): Paste Balloon FIRST
+        balloon_x = (video_width - balloon_img.width) // 2
+        # balloon_y is already calculated before the loop
+        frame.paste(balloon_img, (balloon_x, balloon_y), balloon_img)
+        
+        # 2. Initialize Draw Object AFTER pasting
+        draw = ImageDraw.Draw(frame)
+        
+        # Wrap Text
+        # Heuristic: pixels to chars ratio... simplified.
+        wrapper = textwrap.TextWrapper(width=30) 
+        wrapped_text = wrapper.fill(text=text_content)
+        
+        # 3. Visual Fail-safes & Centering
+        # Calculate text size
+        left, top, right, bottom = draw.textbbox((0, 0), wrapped_text, font=font)
+        text_width = right - left
+        text_height = bottom - top
+        
+        # Visual Fail-safe: Recalculate center
+        # Text Center Y should match Balloon Center Y
+        balloon_center_x = video_width // 2
+        balloon_center_y = balloon_y + (balloon_img.height // 2)
+        
+        text_x = balloon_center_x - (text_width // 2)
+        text_y = balloon_center_y - (text_height // 2)
+        
+        # Visual Fail-safe: Force Color to BLACK
+        text_color = "#000000"
+        
+        # Coordinate Debugging
+        print(f"DEBUG: Balloon Y={balloon_y}, Text Y={text_y}, Color={text_color}")
+        
+        # Draw Text
+        draw.multiline_text(
+            (text_x, text_y), 
+            wrapped_text, 
+            fill=text_color, 
+            font=font, 
+            align="center"
+        )
+        
+        # Save Frame
+        frame_filename = f"frame_{i}.png"
+        frame_path = os.path.join(output_dir, frame_filename)
+        frame.save(frame_path)
+        
+        line['image_path'] = frame_path
+        progress_bar.progress((i + 1) / total_lines)
+
+    return parsed_script
+
+def assemble_video(parsed_script):
+    """
+    4. Assembly Logic
+    Combines frames and audio into video segments, then concatenates them.
+    """
+    st.info("Step 4: Assembling Video...")
+    
+    output_dir = "output"
+    temp_dir = os.path.join(output_dir, "temp")
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    segment_files = []
+    
+    total_lines = len(parsed_script)
+    progress_bar = st.progress(0)
+    
+    for i, line in enumerate(parsed_script):
+        image_path = line.get('image_path')
+        audio_path = line.get('audio_file') # Note: generate_audio used 'audio_path' or 'audio_file'? Let's check... it used 'audio_path', but verify app.py.
+        # Wait, the previous generate_audio code I wrote used `line['audio_path'] = filepath`?
+        # Let's check the code I wrote in app.py Step Id 191... 
+        # Ah, in Step 131 I wrote: line['audio_path'] = filepath
+        # But in Step 191 I wrote: line['audio_file'] = filepath inside generate_video loop but generate_audio inside?
+        # Actually, let's look at generate_audio in app.py from Step 132/191.
+        # It seems I used `line['audio_path'] = filepath` in generate_audio.
+        # But in `generate_video` loop in Step 189/191, I was simulating the loop? No, I called `generate_audio`.
+        # I need to use the key that `generate_audio` sets.
+        # Based on Step 132, it sets `line['audio_path']`. 
+        # Wait, in Step 191 diff, I see in generate_video: `line['audio_file'] = filepath` inside the loop??
+        # Ah, `generate_single_audio` was the old logic... 
+        # In Step 191, I kept `generate_frames` but `generate_video` calls `generate_audio`.
+        # `generate_audio` (Step 132) sets `audio_path`.
+        
+        # Correction: I should check what keys are actually set.
+        # Step 132 `generate_audio`: `line['audio_path'] = filepath`
+        # Step 191 `generate_video` calls `generate_audio`.
+        # So I should use `audio_path`.
+        
+        # BUT, the code visible in Step 191 showed:
+        # `line['audio_file'] = filepath` in the Generate Single Audio loop inside generate_video...
+        # Wait, did I replace generate_audio with the single loop or not?
+        # In Step 191 replace content: `def generate_frames` replaced `def generate_audio`???
+        # No, `generate_frames` starts at `def generate_frames`.
+        # It seems I might have messed up the `generate_audio` function existence if I blindly replaced.
+        # Let's assume standard keys and I will fix if needed. I'll read line keys.
+        
+        audio_path = line.get('audio_path') or line.get('audio_file')
+        duration = line.get('duration')
+        
+        if not image_path or not audio_path:
+            st.warning(f"Skipping line {i} due to missing assets.")
+            continue
+            
+        segment_filename = f"segment_{i}.mp4"
+        segment_path = os.path.join(temp_dir, segment_filename)
+        segment_path = os.path.abspath(segment_path)
+        image_path = os.path.abspath(image_path)
+        audio_path = os.path.abspath(audio_path)
+        
+        try:
+            # Create Segment: Image Loop + Audio
+            # ffmpeg -loop 1 -i image.png -i audio.mp3 -c:v libx264 -t duration -c:a aac -pix_fmt yuv420p out.mp4
+            
+            # Using ffmpeg-python
+            input_image = ffmpeg.input(image_path, loop=1)
+            input_audio = ffmpeg.input(audio_path)
+            
+            # Duration is crucial. If we rely on 'shortest', it ends when audio ends.
+            # Audio might be slightly longer/shorter than duration metadata?
+            # Safest is to use audio length.
+            
+            stream = ffmpeg.output(
+                input_image, 
+                input_audio, 
+                segment_path, 
+                vcodec='libx264', 
+                acodec='aac', 
+                pix_fmt='yuv420p', 
+                shortest=None,
+                tune='stillimage'
+            )
+            
+            # Overwrite if exists
+            stream.run(overwrite_output=True, quiet=True)
+            
+            segment_files.append(segment_path)
+            
+        except ffmpeg.Error as e:
+            st.error(f"FFmpeg Error on segment {i}: {e.stderr.decode() if e.stderr else str(e)}")
+            continue
+        except Exception as e:
+            st.error(f"Error creating segment {i}: {e}")
+            continue
+            
+        progress_bar.progress((i + 1) / total_lines)
+        
+    # Concatenate Segments
+    if not segment_files:
+        st.error("No segments created.")
+        return None
+        
+    final_output = os.path.join(output_dir, "final_video.mp4")
+    final_output = os.path.abspath(final_output)
+    
+    st.info(f"Concatenating {len(segment_files)} segments...")
+    
+    try:
+        # Create a text file for concat demuxer (more robust for many files)
+        list_path = os.path.join(temp_dir, "file_list.txt")
+        with open(list_path, 'w') as f:
+            for seg in segment_files:
+                # FFmpeg concat file format: file 'path'
+                # Path escaping is tricky. 
+                f.write(f"file '{seg.replace(os.sep, '/')}'\n")
+                
+        # ffmpeg -f concat -safe 0 -i list.txt -c copy final.mp4
+        (
+            ffmpeg
+            .input(list_path, format='concat', safe=0)
+            .output(final_output, c='copy')
+            .run(overwrite_output=True, quiet=True)
+        )
+        
+        return final_output
+        
+    except ffmpeg.Error as e:
+        st.error(f"FFmpeg Concat Error: {e.stderr.decode() if e.stderr else str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Error assembling video: {e}")
+        return None
 
 def generate_video(parsed_script):
     """
@@ -119,20 +565,37 @@ def generate_video(parsed_script):
     Main orchestration loop.
     """
     status_text = st.empty()
-    progress_bar = st.progress(0)
+    main_progress = st.progress(0)
     
     # 1. Active Roster
-    status_text.text("Determining active roster...")
+    status_text.text("Step 1: Determining active roster...")
     roster = get_active_roster(parsed_script)
     st.write(f"Active Characters: {roster}")
-    progress_bar.progress(10)
+    main_progress.progress(10)
     
-    # Placeholder for further steps
     # 2. Audio Generation
-    # 3. Visuals
-    # 4. Assembly
+    if parsed_script:
+        status_text.text("Step 2: Generating Audio...")
+        parsed_script_with_audio = generate_audio(parsed_script)
+        st.success(f"Audio generated for {len(parsed_script_with_audio)} lines.")
+        
+        # 3. Visual Generation
+        status_text.text("Step 3: Generating Visuals...")
+        parsed_script_with_visuals = generate_frames(parsed_script_with_audio, roster)
+        st.success("Visuals generated.")
+        
+        # 4. Assembly
+        status_text.text("Step 4: Assembling Video...")
+        final_video_path = assemble_video(parsed_script_with_visuals)
+        
+        if final_video_path:
+            st.success("Video Generation Complete!")
+            st.video(final_video_path)
+        else:
+            st.error("Video Assembly Failed.")
     
-    st.success("Roster determined. (Waiting for further backend logic implementation)")
+    main_progress.progress(100)
+    status_text.text("Process Finished.")
 
 # --- Streamlit UI ---
 
@@ -141,6 +604,25 @@ def main():
 
     # Sidebar
     st.sidebar.title("VN Video Gen")
+    
+    # Dev Tools
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Dev Tools")
+    if st.sidebar.button("Test Audio Generation"):
+         with st.spinner("Testing Audio..."):
+            # Test with Narrator
+            path_n, dur_n = generate_single_audio("This is a test of the narrator voice.", "Narrator", 999)
+            if path_n:
+                st.sidebar.audio(path_n)
+                st.sidebar.success(f"Narrator: {dur_n:.2f}s")
+            
+            # Test with Character (if exists)
+            char_name = next(iter(config.get('characters', {})), None)
+            if char_name:
+                path_c, dur_c = generate_single_audio(f"Hello, I am {char_name}.", char_name, 998)
+                if path_c:
+                    st.sidebar.audio(path_c)
+                    st.sidebar.success(f"{char_name}: {dur_c:.2f}s")
 
     # Main Area
     st.title("Visual Novel Video Generator")
@@ -172,10 +654,14 @@ def main():
         st.info("No script parsed yet. Enter text above and click 'Parse Script'.")
 
     # 4. Generate Video Button
+    # 4. Generate Video Button
     if st.button("Step 2: Generate Video"):
-        st.info("Generating video... (Logic not implemented yet)")
-        # stub logic
-        pass
+        if st.session_state.parsed_script:
+            generate_video(st.session_state.parsed_script)
+            # Force a re-run or just let the user see the success messages. 
+            # The session state is updated in place.
+        else:
+            st.error("Please parse a script first.")
 
 if __name__ == "__main__":
     main()
