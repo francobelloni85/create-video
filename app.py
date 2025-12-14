@@ -98,6 +98,66 @@ def parse_script(raw_text):
         st.error(f"Error parsing script: {e}")
         return []
 
+def generate_social_script(raw_text):
+    """
+    Step 2: Generate Social Script (Module A2 - Gemini Adapter)
+    """
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        st.error("GEMINI_API_KEY not found.")
+        return []
+
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(config['gemini_model'])
+
+        system_prompt = """
+You are a Script Editor for short-form educational videos (TikTok/Reels). INPUT: Raw English text from a lesson. GOAL: Convert this into a fast dialogue script.
+
+RULES:
+
+    REMOVE SPEECH TAGS: Delete "he said", "she asked", "Margot says". Convert strictly to direct speech.
+
+    PRESERVE KEYWORDS: You MUST keep the specific vocabulary used in the text. Do not simplify "south" to "down" or "library" to "bookstore". The lesson depends on these exact words.
+
+    CONDENSE NARRATION: Shorten long descriptions by the Narrator. Keep them only if essential for context.
+
+    CHARACTER MAPPING: Assign lines to: "Herbert", "Margot", "Brian", "Laura", or "Narrator".
+
+OUTPUT: A JSON object with a single key social_script: [{"character": "Margot", "text": "Why are you looking south?"}, ...]
+"""
+        
+        full_prompt = f"{system_prompt}\n\nRAW TEXT:\n{raw_text}"
+        
+        response = model.generate_content(full_prompt)
+        
+        text_response = response.text
+        # Clean markdown
+        if text_response.startswith("```json"):
+            text_response = text_response[7:]
+        if text_response.startswith("```"):
+            text_response = text_response[3:]
+        if text_response.endswith("```"):
+            text_response = text_response[:-3]
+            
+        json_data = json.loads(text_response)
+        social_script = json_data.get("social_script", [])
+        
+        # Normalization: Map 'character' to 'speaker' for app compatibility
+        normalized_script = []
+        for item in social_script:
+             speaker = item.get("character")
+             text = item.get("text")
+             # Simple mapping if needed, or just pass through. 
+             # App expects "speaker" key.
+             normalized_script.append({"speaker": speaker, "text": text})
+             
+        return normalized_script
+
+    except Exception as e:
+        st.error(f"Error generating social script: {e}")
+        return []
+
 # --- Helper Functions ---
 
 def get_active_roster(parsed_script):
@@ -124,6 +184,9 @@ def clean_html_content(raw_html):
     """
     soup = BeautifulSoup(raw_html, 'html.parser')
     
+    # Step 0: Extract Vocabulary (before cleaning destroys structure)
+    vocab_list = extract_vocabulary(soup)
+    
     # Step A: Locate Content
     # Look for vocabulary story OR grammar dialogue
     section = soup.find('section', class_='vocabulary-story')
@@ -147,20 +210,65 @@ def clean_html_content(raw_html):
     text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
     
     # 2. Remove Italian Translations: [tooltip]...[/tooltip]
-    # Remove the tag and everything inside it
-    text = re.sub(r'\[tooltip\].*?\[/tooltip\]', '', text, flags=re.DOTALL)
+    # Remove the tag and everything inside it, replacing with a space to prevent merging
+    text = re.sub(r'\[tooltip\].*?\[/tooltip\]', ' ', text, flags=re.DOTALL)
     
     # 3. Remove Custom Tags: [esempio] and [/esempio]
-    # Keep the content inside, just remove tags
-    text = re.sub(r'\[/?esempio\]', '', text)
+    # Keep the content inside, just remove tags, replacing with space
+    text = re.sub(r'\[/?esempio\]', ' ', text)
     
     # 4. Strip HTML tags (including bold, italics etc.)
     # We parse the modified text again to strip remaining tags safely
     # This also helps handle entity decoding if any
     temp_soup = BeautifulSoup(text, 'html.parser')
-    final_text = temp_soup.get_text()
+    # Use separator to prevent "I am<b>thirty</b>" -> "I amthirty"
+    final_text = temp_soup.get_text(separator=' ')
     
-    return final_text.strip()
+    # Clean up excessive whitespace created by separator
+    final_text = re.sub(r'\s+', ' ', final_text).strip()
+    
+    return final_text, vocab_list
+
+def extract_vocabulary(soup):
+    """
+    Helper: Extracts vocabulary cards from HTML
+    """
+    vocab_list = []
+    cards = soup.find_all('div', class_='vocab-card')
+    
+    for card in cards:
+        # 1. Word
+        word_elem = card.find('h4', class_='word')
+        word = word_elem.get_text(strip=True) if word_elem else ""
+        
+        # 2. Translation
+        # Content: <strong>Translate:</strong> sud
+        trans_elem = card.find('div', class_='vocab-card-translate')
+        translation = ""
+        if trans_elem:
+            raw_trans = trans_elem.get_text(separator=' ', strip=True) # "Translate: sud"
+            # Remove "Translate:" prefix (case insensitive, handle bold tag text too)
+            # Regex to remove "Translate:" or "Translate" and any following colon/space
+            translation = re.sub(r'^Translate:?\s*', '', raw_trans, flags=re.IGNORECASE)
+            translation = re.sub(r'\s+', ' ', translation).strip()
+            
+        # 3. Example
+        # Content: <strong>Example:</strong> He looked south...
+        ex_elem = card.find('div', class_='vocab-card-example')
+        example = ""
+        if ex_elem:
+            raw_ex = ex_elem.get_text(separator=' ', strip=True)
+            example = re.sub(r'^Example:?\s*', '', raw_ex, flags=re.IGNORECASE)
+            example = re.sub(r'\s+', ' ', example).strip()
+            
+        if word:
+            vocab_list.append({
+                "word": word,
+                "translation": translation,
+                "example": example
+            })
+            
+    return vocab_list
 
 def generate_single_audio(text, speaker, index):
     """
@@ -680,10 +788,15 @@ def main():
     # Button to Clean
     if st.button("Clean & Preview Text"):
         with st.spinner("Cleaning HTML..."):
-            cleaned = clean_html_content(raw_html)
-            st.session_state.cleaned_text_preview = cleaned
-            # Force update the widget state
-            st.session_state.cleaned_text_preview_widget = cleaned
+            cleaned_text, vocab_list = clean_html_content(raw_html)
+            
+            # 1. Update Cleaned Text
+            st.session_state.cleaned_text_preview = cleaned_text
+            st.session_state.cleaned_text_preview_widget = cleaned_text
+            st.session_state.original_clean_text = cleaned_text
+            
+            # 2. Update Vocabulary
+            st.session_state.vocab_list = vocab_list
             
             # Simple Type Detection for Feedback
             if raw_html and "vocabulary-story" in raw_html:
@@ -695,46 +808,66 @@ def main():
 
     # 2. Preview & Generate Script
     if 'cleaned_text_preview' in st.session_state and st.session_state.cleaned_text_preview:
+        
+        # --- NEW: Vocabulary Editor ---
+        if 'vocab_list' in st.session_state and st.session_state.vocab_list:
+            st.subheader("Extracted Vocabulary")
+            # Allow users to edit the extracted list
+            edited_vocab = st.data_editor(
+                st.session_state.vocab_list,
+                num_rows="dynamic",
+                key="vocab_editor"
+            )
+            st.session_state.vocab_list = edited_vocab
+            st.write("---")
+        
         st.subheader("Cleaned English Text")
         
         # Editable Text Area for Verification
         final_script_text = st.text_area(
             "Verify & Edit Text", 
-            key='cleaned_text_preview_widget', # Distinct key for the widget if needed, but we want to bind it
-             # Actually, if we use key='cleaned_text_preview', it syncs with session state.
-             # but we just set it above.
-             # safe pattern:
+            key='cleaned_text_preview_widget', 
             value=st.session_state.cleaned_text_preview,
             height=200
         )
         
-        # 2a. Generate Script Button (Only visible after cleaning)
-        if st.button("Step 1: Generate Script"):
-            with st.spinner("Parsing script with Gemini..."):
-                # Use the verified text from the text area
-                # Note: st.text_area with value=... returns the current value.
-                # If user edited, 'final_script_text' holds the edit.
-                parsed_result = parse_script(final_script_text)
-                if parsed_result:
-                    st.session_state.parsed_script = parsed_result
-                    st.success("Script parsed successfully!")
-                    # Optional: Clear the preview or move focus
+        # 2a. Generate Social Script Button
+        st.write("---")
+        if st.button("✨ Generate Social Script (Draft)"):
+             # Ensure we have the original text safely
+             source_text = st.session_state.get('original_clean_text', final_script_text)
+             
+             with st.spinner("Adapting for Social Media (Gemini)..."):
+                 draft = generate_social_script(source_text)
+                 if draft:
+                     st.session_state.social_script_draft = draft
+                     st.session_state.parsed_script = draft # Keep compatibility with Step 2 Video Gen
+                     st.success("Social Script Generated!")
 
-            
-    
+        if 'social_script_draft' in st.session_state:
+             st.subheader("Edit Social Script (Draft)")
+             edited_draft = st.data_editor(st.session_state.social_script_draft, num_rows="dynamic", key='social_draft_editor')
+             # Sync back to social_script_draft AND parsed_script (for video generation)
+             st.session_state.social_script_draft = edited_draft
+             st.session_state.parsed_script = edited_draft
+
     # Placeholder for session state to store parsed script
     if 'parsed_script' not in st.session_state:
-        # Default empty state or instruction
         st.session_state.parsed_script = []
+    
+    if 'social_script_draft' not in st.session_state:
+         # Initialize strictly empty or based on previous parses?
+         # For now, just placeholder.
+         pass
 
-    # 3. Review & Edit
-    st.subheader("Review & Edit")
-    if st.session_state.parsed_script:
-        edited_script = st.data_editor(st.session_state.parsed_script, num_rows="dynamic", key='parsed_editor')
-        # Update session state with edits (though data_editor does this automatically with key, explicit sync is good if needed elsewhere)
-        st.session_state.parsed_script = edited_script
-    else:
-        st.info("No script parsed yet. Enter text above and click 'Parse Script'.")
+    # 3. Review & Edit (Legacy/Fallback view or just debug?)
+    # Since we have the editor above, we might hide this or keep it as read-only debug?
+    # User asked for "Output Display" -> "Display the script in an st.data_editor". 
+    # I did that above.
+    # The existing "Review & Edit" section at 731 uses 'parsed_script'.
+    # I will modify it to be less redundant or just section 3.
+    
+    # Let's keep the Video Gen button section pure.
 
     # 4. Generate Video Button
     # 4. Generate Video Button
