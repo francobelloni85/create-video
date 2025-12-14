@@ -14,6 +14,8 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
 import textwrap
 import uuid
 import ffmpeg
+from bs4 import BeautifulSoup
+import re
 
 # Load configuration
 def load_config():
@@ -114,6 +116,51 @@ def get_active_roster(parsed_script):
                 roster.add(start_speaker)
     
     return list(roster)
+
+def clean_html_content(raw_html):
+    """
+    Step 0: Clean HTML Content
+    Extracts English dialogue from specific lesson structures.
+    """
+    soup = BeautifulSoup(raw_html, 'html.parser')
+    
+    # Step A: Locate Content
+    # Look for vocabulary story OR grammar dialogue
+    section = soup.find('section', class_='vocabulary-story')
+    if not section:
+        section = soup.find('section', class_='dialogue')
+    
+    # Fallback to body or full soup if specific sections not found
+    target_content = section if section else (soup.body if soup.body else soup)
+
+    # Get inner string content to apply regex
+    # decode_contents() gets the inner HTML as string
+    if hasattr(target_content, 'decode_contents'):
+        text = target_content.decode_contents()
+    else:
+        text = str(target_content)
+
+    # Step B: Cleaning
+    
+    # 1. Newlines: <br> -> \n
+    # Handle <br>, <br/>, <br />
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    
+    # 2. Remove Italian Translations: [tooltip]...[/tooltip]
+    # Remove the tag and everything inside it
+    text = re.sub(r'\[tooltip\].*?\[/tooltip\]', '', text, flags=re.DOTALL)
+    
+    # 3. Remove Custom Tags: [esempio] and [/esempio]
+    # Keep the content inside, just remove tags
+    text = re.sub(r'\[/?esempio\]', '', text)
+    
+    # 4. Strip HTML tags (including bold, italics etc.)
+    # We parse the modified text again to strip remaining tags safely
+    # This also helps handle entity decoding if any
+    temp_soup = BeautifulSoup(text, 'html.parser')
+    final_text = temp_soup.get_text()
+    
+    return final_text.strip()
 
 def generate_single_audio(text, speaker, index):
     """
@@ -627,16 +674,52 @@ def main():
     # Main Area
     st.title("Visual Novel Video Generator")
 
-    # 1. Raw Dialogue Input
-    raw_script = st.text_area("Raw Dialogue Input", height=300, placeholder="Paste your messy script here...")
+    # 1. HTML Input
+    raw_html = st.text_area("Paste Lesson HTML", height=300, placeholder="Paste the full lesson HTML code here...")
 
-    # 2. Parse Script Button
-    if st.button("Step 1: Parse Script"):
-        with st.spinner("Parsing script with Gemini..."):
-            parsed_result = parse_script(raw_script)
-            if parsed_result:
-                st.session_state.parsed_script = parsed_result
-                st.success("Script parsed successfully!")
+    # Button to Clean
+    if st.button("Clean & Preview Text"):
+        with st.spinner("Cleaning HTML..."):
+            cleaned = clean_html_content(raw_html)
+            st.session_state.cleaned_text_preview = cleaned
+            # Force update the widget state
+            st.session_state.cleaned_text_preview_widget = cleaned
+            
+            # Simple Type Detection for Feedback
+            if raw_html and "vocabulary-story" in raw_html:
+                st.success("Detected: Vocabulary Lesson")
+            elif raw_html and "dialogue" in raw_html:
+                st.success("Detected: Grammar Dialogue")
+            else:
+                st.info("Using Fallback / Body content extraction")
+
+    # 2. Preview & Generate Script
+    if 'cleaned_text_preview' in st.session_state and st.session_state.cleaned_text_preview:
+        st.subheader("Cleaned English Text")
+        
+        # Editable Text Area for Verification
+        final_script_text = st.text_area(
+            "Verify & Edit Text", 
+            key='cleaned_text_preview_widget', # Distinct key for the widget if needed, but we want to bind it
+             # Actually, if we use key='cleaned_text_preview', it syncs with session state.
+             # but we just set it above.
+             # safe pattern:
+            value=st.session_state.cleaned_text_preview,
+            height=200
+        )
+        
+        # 2a. Generate Script Button (Only visible after cleaning)
+        if st.button("Step 1: Generate Script"):
+            with st.spinner("Parsing script with Gemini..."):
+                # Use the verified text from the text area
+                # Note: st.text_area with value=... returns the current value.
+                # If user edited, 'final_script_text' holds the edit.
+                parsed_result = parse_script(final_script_text)
+                if parsed_result:
+                    st.session_state.parsed_script = parsed_result
+                    st.success("Script parsed successfully!")
+                    # Optional: Clear the preview or move focus
+
             
     
     # Placeholder for session state to store parsed script
