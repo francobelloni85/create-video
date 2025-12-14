@@ -78,11 +78,10 @@ def generate_vocab_assets(vocab_list):
             draw = ImageDraw.Draw(img)
             
             # Fonts
-            # Large Bold Black for Word (Top)
-            # Slightly Smaller Dark Grey for Translation (Bottom)
-            
-            font_size_word = 120
-            font_size_trans = 100
+            # English Word: Bigger
+            # Translation: Smaller
+            font_size_word = 130
+            font_size_trans = 90
             
             if font_path_main:
                 try:
@@ -96,22 +95,58 @@ def generate_vocab_assets(vocab_list):
                  font_trans = ImageFont.load_default()
 
             # Colors
-            color_word = "#000000"
-            color_trans = "#333333"
+            primary_color = "#4F46E5" # Indigo/Blue
+            text_color_word = "#FFFFFF" # White
+            text_color_trans = "#222222" # Dark Grey/Black
             
-            # Position: Word ~ Y=30% (576px), Trans ~ Y=75% (1440px)
-            # Center Horizontally
+            # --- Layout Calculations ---
+            # Word Center Y = 42% of 1920 ~= 806
+            # Trans Center Y = 58% of 1920 ~= 1114
             
-            # Helper to draw centered
-            def draw_centered(text, y_pos, font, fill):
-                bbox = draw.textbbox((0, 0), text, font=font)
-                w = bbox[2] - bbox[0]
-                h = bbox[3] - bbox[1]
-                x = (1080 - w) // 2
-                draw.text((x, y_pos - h//2), text, font=font, fill=fill)
+            y_center_word = 806
+            y_center_trans = 1114
             
-            draw_centered(word, 576, font_word, color_word)
-            draw_centered(translation, 1440, font_trans, color_trans)
+            # 1. Draw English Word (Badge Style)
+            # Calculate text size
+            bbox_word = draw.textbbox((0, 0), word, font=font_word)
+            w_word = bbox_word[2] - bbox_word[0]
+            h_word = bbox_word[3] - bbox_word[1]
+            
+            # Badge dimensions with padding
+            pad_x = 60
+            pad_y = 40
+            badge_w = w_word + (pad_x * 2)
+            badge_h = h_word + (pad_y * 2)
+            
+            badge_x1 = (1080 - badge_w) // 2
+            badge_y1 = y_center_word - (badge_h // 2)
+            badge_x2 = badge_x1 + badge_w
+            badge_y2 = badge_y1 + badge_h
+            
+            # Draw Badge (Rounded Rectangle)
+            try:
+                draw.rounded_rectangle([badge_x1, badge_y1, badge_x2, badge_y2], radius=40, fill=primary_color)
+            except AttributeError:
+                # Fallback for older Pillow versions
+                draw.rectangle([badge_x1, badge_y1, badge_x2, badge_y2], fill=primary_color)
+            
+            # Draw Word Text (Centered in Badge)
+            # Note: aligning text perfectly can be tricky with ascenders/descenders. 
+            # Using basic centering logic here.
+            text_x_word = (1080 - w_word) // 2
+            text_y_word = y_center_word - (h_word // 2)
+            draw.text((text_x_word, text_y_word - 10), word, font=font_word, fill=text_color_word) 
+            # -10 fix for visual centering often needed with PIL fonts
+
+            # 2. Draw Translation (Simple Text)
+            bbox_trans = draw.textbbox((0, 0), translation, font=font_trans)
+            w_trans = bbox_trans[2] - bbox_trans[0]
+            h_trans = bbox_trans[3] - bbox_trans[1]
+            
+            text_x_trans = (1080 - w_trans) // 2
+            text_y_trans = y_center_trans - (h_trans // 2)
+            
+            draw.text((text_x_trans, text_y_trans), translation, font=font_trans, fill=text_color_trans)
             
             img.save(card_path)
             
@@ -142,7 +177,7 @@ def create_vocab_video_sequence(assets):
     intro_path = "assets/vocabulary.png"
     if os.path.exists(intro_path):
         try:
-            intro_clip = ImageClip(intro_path).with_duration(1.0)
+            intro_clip = ImageClip(intro_path).with_duration(2.0)
             vocab_clips.append(intro_clip)
         except Exception as e:
             st.warning(f"Could not load intro stinger: {e}")
@@ -158,8 +193,8 @@ def create_vocab_video_sequence(assets):
             continue
             
         try:
-            # Base Clip (Image) - 3.0s
-            base_clip = ImageClip(img_path).with_duration(3.0)
+            # Base Clip (Image) - 2.5s
+            base_clip = ImageClip(img_path).with_duration(2.5)
             
             # Audio
             audio_clip = AudioFileClip(audio_path)
@@ -170,16 +205,16 @@ def create_vocab_video_sequence(assets):
             
             # Reveal Mask (ColorClip)
             # White box covering bottom 50%
-            # Duration: 0.0s to 1.5s
+            # Duration: 0.0s to 1.2s (Reveal at 1.2s)
             # Geometry: 1080x960, pos=(0, 960)
             
             mask_clip = ColorClip(size=(1080, 960), color=(255, 255, 255))
             mask_clip = mask_clip.with_position((0, 960))
-            mask_clip = mask_clip.with_start(0).with_duration(1.5)
+            mask_clip = mask_clip.with_start(0).with_duration(1.2)
             
             # Composite
             final_card_clip = CompositeVideoClip([base_clip, mask_clip], size=(1080, 1920))
-            final_card_clip = final_card_clip.with_duration(3.0) # Enforce 3s
+            final_card_clip = final_card_clip.with_duration(2.5) # Enforce 2.5s
             
             vocab_clips.append(final_card_clip)
             
