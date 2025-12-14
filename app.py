@@ -14,8 +14,12 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
 import textwrap
 import uuid
 import ffmpeg
+import edge_tts
+import asyncio
+from moviepy import ImageClip, CompositeVideoClip, ColorClip, concatenate_videoclips, AudioFileClip, VideoFileClip
 from bs4 import BeautifulSoup
 import re
+from vocab_functions import generate_vocab_assets, create_vocab_video_sequence
 
 # Load configuration
 def load_config():
@@ -787,6 +791,34 @@ def generate_video(parsed_script):
         final_video_path = assemble_video(parsed_script_with_visuals)
         
         if final_video_path:
+            # 5. Append Vocabulary (Phase 3)
+            if 'vocab_list' in st.session_state and st.session_state.vocab_list:
+                status_text.text("Step 5: Appending Vocabulary Section...")
+                # Call helper from vocab_functions
+                # Ensure vocab assets generation
+                vocab_assets = generate_vocab_assets(st.session_state.vocab_list)
+                if vocab_assets:
+                    vocab_clip = create_vocab_video_sequence(vocab_assets)
+                    
+                    if vocab_clip:
+                        try:
+                            st.info("Concatenating Main Video + Vocabulary...")
+                            main_clip = VideoFileClip(final_video_path)
+                            final_combined = concatenate_videoclips([main_clip, vocab_clip])
+                            
+                            combined_path = final_video_path.replace(".mp4", "_with_vocab.mp4")
+                            # Write using MoviePy
+                            final_combined.write_videofile(
+                                combined_path, 
+                                codec="libx264", 
+                                audio_codec="aac",
+                                logger=None # Silence logger to avoid console spam
+                            )
+                            final_video_path = combined_path
+                            st.success("Vocabulary Appended!")
+                        except Exception as e:
+                            st.error(f"Failed to append vocabulary: {e}")
+
             st.success("Video Generation Complete!")
             st.video(final_video_path)
         else:
