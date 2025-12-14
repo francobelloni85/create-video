@@ -15,7 +15,7 @@
     }
   },
   "characters": {
-    "Herbert Walker": {
+    "Herbert": {
       "image": "assets/herbert.png",
       "voice_params": {
         "language_code": "en-US",
@@ -23,7 +23,7 @@
         "ssml_gender": "MALE"
       }
     },
-    "Margot Walker": {
+    "Margot": {
       "image": "assets/margot.png",
       "voice_params": {
         "language_code": "en-US",
@@ -31,7 +31,7 @@
         "ssml_gender": "FEMALE"
       }
     },
-    "Brian Walker": {
+    "Brian": {
       "image": "assets/brian.png",
       "voice_params": {
         "language_code": "en-US",
@@ -39,7 +39,7 @@
         "ssml_gender": "MALE"
       }
     },
-    "Laura Walker": {
+    "Laura": {
       "image": "assets/laura.png",
       "voice_params": {
         "language_code": "en-US",
@@ -47,7 +47,7 @@
         "ssml_gender": "FEMALE"
       }
     },
-    "Molly Walker": {
+    "Molly": {
       "image": "assets/molly.png",
       "voice_params": {
         "language_code": "en-US",

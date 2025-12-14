@@ -51,11 +51,11 @@ def parse_script(raw_text):
         A list of objects: `[{"speaker": "Exact Character Name", "text": "Cleaned Dialogue content"}]`
     
         **Character Mapping Rules (STRICT):**
-        - If the text mentions "Herbert", "Mr. Walker", or "Dad" -> Map speaker to: "Herbert Walker"
-        - If the text mentions "Margot", "Mrs. Walker", or "Mom" -> Map speaker to: "Margot Walker"
-        - If the text mentions "Brian" -> Map speaker to: "Brian Walker"
-        - If the text mentions "Laura" -> Map speaker to: "Laura Walker"
-        - If the text mentions "Molly" -> Map speaker to: "Molly Walker"
+        - If the text mentions "Herbert", "Mr. Walker", or "Dad" -> Map speaker to: "Herbert"
+        - If the text mentions "Margot", "Mrs. Walker", or "Mom" -> Map speaker to: "Margot"
+        - If the text mentions "Brian" -> Map speaker to: "Brian"
+        - If the text mentions "Laura" -> Map speaker to: "Laura"
+        - If the text mentions "Molly" -> Map speaker to: "Molly"
         - If the text describes an action, scene, or context (no spoken words) -> Map speaker to: "Narrator"
     
         **Cleaning Rules:**
@@ -70,9 +70,9 @@ def parse_script(raw_text):
     
         **Example Output:**
         [
-        {"speaker": "Brian Walker", "text": "I am hungry."},
+        {"speaker": "Brian", "text": "I am hungry."},
         {"speaker": "Narrator", "text": "Molly laughs."},
-        {"speaker": "Molly Walker", "text": "Me too!"}
+        {"speaker": "Molly", "text": "Me too!"}
         ]
     
         Return ONLY the valid JSON. No markdown formatting.
@@ -160,6 +160,42 @@ OUTPUT: A JSON object with a single key social_script: [{"character": "Margot", 
 
 # --- Helper Functions ---
 
+def resolve_character_key(name):
+    """
+    Robustly resolves a character name from the script to a key in config.json.
+    Strategies:
+    1. Exact Match
+    2. Case-Insensitive Match
+    3. Partial Match (Script Name contains Config Key) e.g. "Herbert Walker" -> "Herbert"
+    """
+    if not name or name == "Narrator":
+        return None
+
+    valid_keys = config.get('characters', {}).keys()
+    
+    # Strategy 1: Exact Match
+    if name in valid_keys:
+        return name
+        
+    # Strategy 2: Case-Insensitive
+    for key in valid_keys:
+        if key.lower() == name.lower():
+            return key
+            
+    # Strategy 3: Partial Match (Name starts with Key)
+    # Useful if Script says "Herbert Walker" but Key is "Herbert"
+    for key in valid_keys:
+        if name.lower().startswith(key.lower()):
+            return key
+            
+    # Strategy 4: Reverse Partial (Key starts with Name)
+    # Useful if Script says "Herbert" but Key is "Herbert Walker"
+    for key in valid_keys:
+        if key.lower().startswith(name.lower()):
+            return key
+            
+    return None
+
 def get_active_roster(parsed_script):
     """
     1. Roster Logic
@@ -170,10 +206,10 @@ def get_active_roster(parsed_script):
     
     for line in parsed_script:
         speaker = line.get('speaker')
-        if speaker:
-            start_speaker = speaker.strip()
-            if start_speaker != "Narrator" and start_speaker in valid_characters:
-                roster.add(start_speaker)
+        if speaker and speaker != "Narrator":
+            resolved_key = resolve_character_key(speaker)
+            if resolved_key:
+                roster.add(resolved_key) # Store the Config Key, not the Script Name
     
     return list(roster)
 
@@ -296,10 +332,12 @@ def generate_single_audio(text, speaker, index):
     if speaker == "Narrator":
         voice_params = config.get('narrator', {}).get('voice_params')
     else:
-        # Check specific character
-        char_config = config.get('characters', {}).get(speaker)
-        if char_config:
-            voice_params = char_config.get('voice_params')
+        # Check specific character using robust lookup
+        resolved_key = resolve_character_key(speaker)
+        if resolved_key:
+            char_config = config.get('characters', {}).get(resolved_key)
+            if char_config:
+                voice_params = char_config.get('voice_params')
 
     if not voice_params:
         # Fallback to Narrator if character not found 
@@ -505,7 +543,12 @@ def generate_frames(parsed_script, roster):
                 # Safeguard 3: Opacity Logic
                 # If Narrator is speaking, EVERYONE is 50%
                 # If Character is speaking, they are 100%, others 50%
-                is_active = (speaker == char_name)
+                
+                # Robustly check if this character is the active speaker
+                # We need to resolve the current line's speaker to a config key
+                current_speaker_key = resolve_character_key(speaker)
+                
+                is_active = (current_speaker_key == char_name)
                 is_narrator = (speaker == "Narrator")
                 
                 if is_narrator or not is_active:
