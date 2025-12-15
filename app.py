@@ -483,7 +483,6 @@ def generate_frames(parsed_script, roster):
     """
     3. Visual Generation Logic (Vertical Ensemble)
     """
-    """
     st.info("Step 3: Generating Visuals...")
     logger.info("Starting visual generation...")
     
@@ -683,7 +682,6 @@ def assemble_video(parsed_script):
     4. Assembly Logic
     Combines frames and audio into video segments, then concatenates them.
     """
-    """
     st.info("Step 4: Assembling Video...")
     logger.info("Starting video assembly...")
     
@@ -848,45 +846,81 @@ def generate_video(parsed_script):
         final_video_path = assemble_video(parsed_script_with_visuals)
         
         if final_video_path:
-            # 5. Append Vocabulary (Phase 3)
-            if 'vocab_list' in st.session_state and st.session_state.vocab_list:
-                status_text.text("Step 5: Appending Vocabulary Section...")
-                
-                # Call helper from vocab_functions
-                vocab_assets = generate_vocab_assets(st.session_state.vocab_list)
-                
-                if vocab_assets:
-                    vocab_clip = create_vocab_video_sequence(vocab_assets)
-                    
-                    if vocab_clip:
-                        try:
-                            st.info("Concatenating Main Video + Vocabulary...")
-                            main_clip = VideoFileClip(final_video_path)
-                            final_combined = concatenate_videoclips([main_clip, vocab_clip])
-                            
-                            combined_path = final_video_path.replace(".mp4", "_with_vocab.mp4")
-                            # Write using MoviePy
-                            final_combined.write_videofile(
-                                combined_path, 
-                                codec="libx264", 
-                                audio_codec="aac",
-                                logger=None 
-                            )
-                            final_video_path = combined_path
-                            st.success("Vocabulary Appended!")
-                        except Exception as e:
-                            st.error(f"Failed to append vocabulary: {e}")
-                    else:
-                        st.error("Vocabulary Video Sequence failed to generate (returned None).")
-                else:
-                    st.error("Vocabulary Assets failed to generate (returned None).")
-            else:
-                # Optional: Silent skip or warning. User might just not have vocab.
-                # st.warning("Skipping Vocabulary due to empty list.")
-                pass
+            # 5. Robust Montage Logic (Intro + Main + [Vocab])
+            status_text.text("Step 5: Final Montage & Branding...")
             
-            st.success("Video Generation Complete!")
-            st.video(final_video_path)
+            try:
+                # A. Prepare Intro
+                intro_path = "assets/intro.mp4"
+                if os.path.exists(intro_path):
+                    intro_clip = VideoFileClip(intro_path)
+                    # Resize/Crop to 1080x1920 to ensure match
+                    # Using resize((1080, 1920)) forces exact dimensions, might stretch if aspect ratio differs
+                    # But per user constraint: "Ensure intro_clip is resized/cropped to 1080x1920"
+                    intro_clip = intro_clip.resized(new_size=(1080, 1920))
+                else:
+                    st.warning(f"Intro video not found at {intro_path}, skipping.")
+                    intro_clip = None
+
+                # B. Main Clip
+                main_clip = VideoFileClip(final_video_path)
+                
+                # Start Clip List
+                final_clips = []
+                if intro_clip:
+                    final_clips.append(intro_clip)
+                final_clips.append(main_clip)
+                
+                # C. Conditional Vocab
+                # Check Config AND Session State
+                enable_vocab = config.get("ENABLE_VOCAB_SECTION", True)
+                if enable_vocab and 'vocab_list' in st.session_state and st.session_state.vocab_list:
+                    status_text.text("Adding Vocabulary Section...")
+                    vocab_assets = generate_vocab_assets(st.session_state.vocab_list)
+                    if vocab_assets:
+                        vocab_clip = create_vocab_video_sequence(vocab_assets)
+                        if vocab_clip:
+                            final_clips.append(vocab_clip)
+                        else:
+                             st.error("Vocabulary Video Sequence failed (None).")
+                    else:
+                         st.error("Vocabulary Assets failed (None).")
+                
+                # D. Concatenate
+                st.info(f"Concatenating {len(final_clips)} clips...")
+                final_combined = concatenate_videoclips(final_clips)
+                
+                # E. Branding Overlay
+                overlay_path = "assets/NoBackground.png"
+                if os.path.exists(overlay_path):
+                    try:
+                        overlay_clip = ImageClip(overlay_path)
+                        overlay_clip = overlay_clip.with_duration(final_combined.duration)
+                        overlay_clip = overlay_clip.with_position(('center', 'bottom'))
+                        
+                        final_combined = CompositeVideoClip([final_combined, overlay_clip])
+                        st.info("Branding Overlay Applied.")
+                    except Exception as e:
+                        st.warning(f"Overlay Error: {e}")
+                else:
+                    st.warning("Overlay image not found (assets/NoBackground.png).")
+
+                # F. Export
+                combined_path = final_video_path.replace(".mp4", "_final.mp4")
+                final_combined.write_videofile(
+                    combined_path, 
+                    codec="libx264", 
+                    audio_codec="aac",
+                    logger=None 
+                )
+                
+                final_video_path = combined_path
+                st.success("Video Generation Sequence Complete!")
+                st.video(final_video_path)
+
+            except Exception as e:
+                st.error(f"Critical Error in Montage/Export: {e}")
+                logger.error(f"Critical Error in Montage/Export: {e}", exc_info=True)
         else:
             st.error("Video Assembly Failed.")
     
