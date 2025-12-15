@@ -3,8 +3,39 @@ import json
 import os
 from dotenv import load_dotenv
 
+import logging
+
 # Load environment variables
 load_dotenv()
+
+# Logger Setup
+def setup_logging(debug_mode=False):
+    level = logging.DEBUG if debug_mode else logging.INFO
+    
+    # Create logger
+    logger = logging.getLogger()
+    logger.setLevel(level)
+    
+    # Check if handlers already exist to avoid duplicates
+    if not logger.handlers:
+        # File Handler
+        file_handler = logging.FileHandler('app.log')
+        file_handler.setLevel(level)
+        file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(file_formatter)
+        logger.addHandler(file_handler)
+        
+        # Optional: Console Handler (Streamlit prints to console anyway, but good for cleanliness)
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(level)
+        console_formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
+        console_handler.setFormatter(console_formatter)
+        logger.addHandler(console_handler)
+    else:
+        # Update level if it changes
+        logger.setLevel(level)
+        for handler in logger.handlers:
+            handler.setLevel(level)
 
 # Load configuration
 import google.generativeai as genai
@@ -21,6 +52,8 @@ from bs4 import BeautifulSoup
 import re
 from vocab_functions import generate_vocab_assets, create_vocab_video_sequence
 
+logger = logging.getLogger(__name__)
+
 # Load configuration
 def load_config():
     try:
@@ -28,6 +61,7 @@ def load_config():
             return json.load(f)
     except FileNotFoundError:
         st.error("config.json not found.")
+        logger.error("config.json not found.")
         return {}
 
 config = load_config()
@@ -41,9 +75,11 @@ def parse_script(raw_text):
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         st.error("GEMINI_API_KEY not found in environment variables.")
+        logger.error("GEMINI_API_KEY not found.")
         return []
 
     try:
+        logger.info("Parsing script with Gemini...")
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(config['gemini_model'])
 
@@ -96,10 +132,12 @@ def parse_script(raw_text):
             text_response = text_response[:-3]
             
         parsed_data = json.loads(text_response)
+        logger.info(f"Successfully parsed script. {len(parsed_data)} lines found.")
         return parsed_data
         
     except Exception as e:
         st.error(f"Error parsing script: {e}")
+        logger.error(f"Error parsing script: {e}", exc_info=True)
         return []
 
 def generate_social_script(raw_text):
@@ -109,6 +147,7 @@ def generate_social_script(raw_text):
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         st.error("GEMINI_API_KEY not found.")
+        logger.error("GEMINI_API_KEY not found.")
         return []
 
     try:
@@ -124,7 +163,7 @@ RULES:
 
     PRESERVE KEYWORDS: You MUST keep the specific vocabulary used in the text. Do not simplify "south" to "down" or "library" to "bookstore". The lesson depends on these exact words.
 
-    CONDENSE NARRATION: Shorten long descriptions by the Narrator. Keep them only if essential for context.
+    CONDENSE NARRATION: Shorten long descriptions by the Narrator.
 
     CHARACTER MAPPING: Assign lines to: "Herbert", "Margot", "Brian", "Laura", or "Narrator".
 
@@ -160,6 +199,7 @@ OUTPUT: A JSON object with a single key social_script: [{"character": "Margot", 
 
     except Exception as e:
         st.error(f"Error generating social script: {e}")
+        logger.error(f"Error generating social script: {e}", exc_info=True)
         return []
 
 # --- Helper Functions ---
@@ -329,6 +369,7 @@ def generate_single_audio(text, speaker, index):
         client = texttospeech.TextToSpeechClient()
     except Exception as e:
         st.error(f"Failed to initialize TTS client: {e}")
+        logger.error(f"Failed to initialize TTS client: {e}", exc_info=True)
         return None, 0.0
 
     # Determine Voice Params
@@ -349,6 +390,7 @@ def generate_single_audio(text, speaker, index):
     
     if not voice_params:
          st.error(f"Critical: No voice params found for {speaker} and no default narrator config.")
+         logger.critical(f"No voice params found for {speaker} and no default narrator config.")
          return None, 0.0
 
     # Prepare Request
@@ -380,6 +422,7 @@ def generate_single_audio(text, speaker, index):
         )
     except Exception as e:
         st.error(f"TTS API Error for {speaker}: {e}")
+        logger.error(f"TTS API Error for {speaker}: {e}", exc_info=True)
         return None, 0.0
 
     # Save File
@@ -398,6 +441,7 @@ def generate_single_audio(text, speaker, index):
         duration = audio.info.length
     except Exception as e:
         st.warning(f"Could not determine duration for {filepath}: {e}")
+        logger.warning(f"Could not determine duration for {filepath}: {e}")
         duration = 0.0
         
     return filepath, duration
@@ -439,7 +483,9 @@ def generate_frames(parsed_script, roster):
     """
     3. Visual Generation Logic (Vertical Ensemble)
     """
+    """
     st.info("Step 3: Generating Visuals...")
+    logger.info("Starting visual generation...")
     
     output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
@@ -456,6 +502,7 @@ def generate_frames(parsed_script, roster):
         font = ImageFont.truetype(font_path, config['settings'].get('font_size', 50))
     except IOError:
         st.warning(f"Could not load font {font_path}, using default.")
+        logger.warning(f"Could not load font {font_path}, using default.")
         font = ImageFont.load_default()
 
     # Load Balloon
@@ -469,6 +516,7 @@ def generate_frames(parsed_script, roster):
         balloon_img = balloon_img.resize((b_target_width, b_target_height), Image.Resampling.LANCZOS)
     except FileNotFoundError:
         st.error(f"Balloon image not found at {balloon_path}")
+        logger.error(f"Balloon image not found at {balloon_path}")
         return parsed_script
 
     # 2. Pre-load and Normalize Roster Images (Safeguard 1)
@@ -491,6 +539,7 @@ def generate_frames(parsed_script, roster):
                 roster_images[char_name] = img
             except Exception as e:
                 st.warning(f"Could not load image for {char_name}: {e}")
+                logger.warning(f"Could not load image for {char_name}: {e}")
         else:
             st.warning(f"No image config found for {char_name}")
 
@@ -608,7 +657,7 @@ def generate_frames(parsed_script, roster):
         text_color = "#000000"
         
         # Coordinate Debugging
-        print(f"DEBUG: Balloon Y={balloon_y}, Text Y={text_y}, Color={text_color}")
+        logger.debug(f"Frame {i}: Balloon Y={balloon_y}, Text Y={text_y}, Color={text_color}")
         
         # Draw Text
         draw.multiline_text(
@@ -634,7 +683,9 @@ def assemble_video(parsed_script):
     4. Assembly Logic
     Combines frames and audio into video segments, then concatenates them.
     """
+    """
     st.info("Step 4: Assembling Video...")
+    logger.info("Starting video assembly...")
     
     output_dir = "output"
     temp_dir = os.path.join(output_dir, "temp")
@@ -680,6 +731,7 @@ def assemble_video(parsed_script):
         
         if not image_path or not audio_path:
             st.warning(f"Skipping line {i} due to missing assets.")
+            logger.warning(f"Skipping line {i} due to missing assets. Image: {image_path}, Audio: {audio_path}")
             continue
             
         segment_filename = f"segment_{i}.mp4"
@@ -718,9 +770,11 @@ def assemble_video(parsed_script):
             
         except ffmpeg.Error as e:
             st.error(f"FFmpeg Error on segment {i}: {e.stderr.decode() if e.stderr else str(e)}")
+            logger.error(f"FFmpeg Error on segment {i}", exc_info=True)
             continue
         except Exception as e:
             st.error(f"Error creating segment {i}: {e}")
+            logger.error(f"Error creating segment {i}: {e}", exc_info=True)
             continue
             
         progress_bar.progress((i + 1) / total_lines)
@@ -728,6 +782,7 @@ def assemble_video(parsed_script):
     # Concatenate Segments
     if not segment_files:
         st.error("No segments created.")
+        logger.error("No segments created.")
         return None
         
     final_output = os.path.join(output_dir, "final_video.mp4")
@@ -756,9 +811,11 @@ def assemble_video(parsed_script):
         
     except ffmpeg.Error as e:
         st.error(f"FFmpeg Concat Error: {e.stderr.decode() if e.stderr else str(e)}")
+        logger.error(f"FFmpeg Concat Error", exc_info=True)
         return None
     except Exception as e:
         st.error(f"Error assembling video: {e}")
+        logger.error(f"Error assembling video: {e}", exc_info=True)
         return None
 
 def generate_video(parsed_script):
@@ -794,9 +851,10 @@ def generate_video(parsed_script):
             # 5. Append Vocabulary (Phase 3)
             if 'vocab_list' in st.session_state and st.session_state.vocab_list:
                 status_text.text("Step 5: Appending Vocabulary Section...")
+                
                 # Call helper from vocab_functions
-                # Ensure vocab assets generation
                 vocab_assets = generate_vocab_assets(st.session_state.vocab_list)
+                
                 if vocab_assets:
                     vocab_clip = create_vocab_video_sequence(vocab_assets)
                     
@@ -812,13 +870,21 @@ def generate_video(parsed_script):
                                 combined_path, 
                                 codec="libx264", 
                                 audio_codec="aac",
-                                logger=None # Silence logger to avoid console spam
+                                logger=None 
                             )
                             final_video_path = combined_path
                             st.success("Vocabulary Appended!")
                         except Exception as e:
                             st.error(f"Failed to append vocabulary: {e}")
-
+                    else:
+                        st.error("Vocabulary Video Sequence failed to generate (returned None).")
+                else:
+                    st.error("Vocabulary Assets failed to generate (returned None).")
+            else:
+                # Optional: Silent skip or warning. User might just not have vocab.
+                # st.warning("Skipping Vocabulary due to empty list.")
+                pass
+            
             st.success("Video Generation Complete!")
             st.video(final_video_path)
         else:
@@ -834,6 +900,12 @@ def main():
 
     # Sidebar
     st.sidebar.title("VN Video Gen")
+    
+    # 0. Global Settings
+    debug_mode = st.sidebar.checkbox("Debug Mode", value=False)
+    setup_logging(debug_mode)
+    if debug_mode:
+        st.sidebar.warning("Debug Mode Enabled: detailed logs in app.log")
     
     # Dev Tools
     st.sidebar.markdown("---")

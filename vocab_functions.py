@@ -1,9 +1,12 @@
+import logging
 import streamlit as st
 import os
 import asyncio
 import edge_tts
 from PIL import Image, ImageDraw, ImageFont
-from moviepy import ImageClip, CompositeVideoClip, ColorClip, concatenate_videoclips, AudioFileClip
+from moviepy import ImageClip, CompositeVideoClip, ColorClip, concatenate_videoclips, AudioFileClip, AudioClip, concatenate_audioclips
+
+logger = logging.getLogger(__name__)
 
 # --- Vocabulary Video Functions ---
 
@@ -14,221 +17,208 @@ async def _edge_tts_generate(text, voice, output_file):
 
 def generate_vocab_assets(vocab_list):
     """
-    Phase 1: Asset Factory
-    Generates audio (MP3) and image cards (PNG) for the vocabulary list.
+    Phase 1: Asset Factory - Single Summary Slide Strategy
+    Generates:
+      1. A single summary slide (PNG) with all words (Badges + Text).
+      2. A single concatenated audio file (MP3) with all pronunciations + silence.
+    Returns a dict with paths to these two assets.
     """
-    st.info("Generating Vocabulary Assets...")
+    st.info("Generating Vocabulary Assets (Summary Slide)...")
+    logger.info("Generating Vocabulary Assets (Summary Slide)...")
     
-    # 1. Clean/Init Temp Folder
+    # 1. Init Temp
     temp_dir = "temp"
     os.makedirs(temp_dir, exist_ok=True)
     
-    # Clean existing temp files? Maybe risky if parallel. 
-    # Let's just overwrite by index.
+    # Base Image
+    base_image_path = "assets/vocabulary.png"
+    if not os.path.exists(base_image_path):
+        st.error(f"Base image not found: {base_image_path}")
+        logger.error(f"Base image not found: {base_image_path}")
+        return None
+        
+    try:
+        img = Image.open(base_image_path).convert("RGBA")
+    except Exception as e:
+        st.error(f"Failed to load base image: {e}")
+        logger.error(f"Failed to load base image: {e}", exc_info=True)
+        return None
+
+    draw = ImageDraw.Draw(img)
     
-    generated_assets = []
-    
-    # 2. Iteration
-    progress_bar = st.progress(0)
-    total = len(vocab_list)
-    
+    # Fonts Setup
     font_path_main = "assets/font.ttf"
     if not os.path.exists(font_path_main):
-        # Fallback to system fonts or provided arial
-        # Try a list of common bold fonts
+        # Fallback candidates
         candidates = ["arialbd.ttf", "arial.ttf", "SegoeUI.ttf", "Roboto-Bold.ttf"]
-        found = False
         for c in candidates:
              try:
-                 ImageFont.truetype(c, 50) # value check
+                 ImageFont.truetype(c, 50) 
                  font_path_main = c
-                 found = True
                  break
              except:
                  continue
-        if not found:
-            font_path_main = None # Use default fallback
+    
+    font_size_word = 100 # Slightly smaller than before to ensure fit if 5 items
+    font_size_trans = 70
+    
+    if font_path_main:
+        try:
+            font_word = ImageFont.truetype(font_path_main, font_size_word)
+            font_trans = ImageFont.truetype(font_path_main, font_size_trans)
+        except:
+            font_word = ImageFont.load_default()
+            font_trans = ImageFont.load_default()
+    else:
+         font_word = ImageFont.load_default()
+         font_trans = ImageFont.load_default()
 
+    # Layout Config
+    start_y = 670
+    step_y = 180 # Vertical step (USER REQUESTED)
+    center_axis_x = 540 # Half of 1080
+    center_gap = 20     # Gap from center for both sides
+    
+    # Badge Config
+    badge_color = "#3B82F6" # Blue
+    text_color_word = "#FFFFFF"
+    text_color_trans = "#000000"
+    
+    audio_clips = []
+    
+    # Process Items
     for i, item in enumerate(vocab_list):
         word = item.get('word') or 'Unknown'
         translation = item.get('translation') or 'Unknown'
         
-        # --- A. Audio Generation (EdgeTTS) ---
+        # --- A. Audio Part ---
         audio_filename = f"vocab_audio_{i}.mp3"
-        audio_path = os.path.join(temp_dir, audio_filename)
-        audio_path = os.path.abspath(audio_path)
+        audio_path = os.path.abspath(os.path.join(temp_dir, audio_filename))
         
         try:
-            # Run async function in sync context
+            # Sync wrapper for edge-tts
             asyncio.run(_edge_tts_generate(word, "en-US-ChristopherNeural", audio_path))
+            
+            # Load as AudioFileClip
+            if os.path.exists(audio_path):
+                clip = AudioFileClip(audio_path)
+                audio_clips.append(clip)
+                
+                # Add Silence (0.3s)
+                # Using a silent list method compatible with moviepy
+                silence = AudioClip(lambda t: [0], duration=0.3, fps=44100)
+                audio_clips.append(silence)
+                
         except Exception as e:
-            st.error(f"EdgeTTS failed for '{word}': {e}")
-            # Fallback? Create silent mp3? Or just skip?
-            # Create a 1s silent audio just in case to not break pipeline
-            # For now, let's hope it works or user sees error.
+            st.error(f"Audio gen failed for '{word}': {e}")
+            logger.error(f"Audio gen failed for '{word}': {e}", exc_info=True)
+            
+        # --- B. Visual Part ---
+        # Calculate Y for this row
+        current_y = start_y + (i * step_y)
         
-        # --- B. Image Card Generation ---
-        card_filename = f"vocab_card_{i}.png"
-        card_path = os.path.join(temp_dir, card_filename)
-        card_path = os.path.abspath(card_path)
+        # 1. Left Side: English Badge
+        # We want the Right Edge of the badge to be at (center_axis_x - center_gap)
+        
+        bbox = draw.textbbox((0, 0), word, font=font_word)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        
+        # Badge Geometry
+        padding_total = 100 # 50px each side
+        badge_w = text_w + padding_total
+        badge_h = text_h + 50 # Vertical padding
+        
+        # Position: Right aligned to spine
+        badge_right_edge = center_axis_x - center_gap
+        badge_x1 = badge_right_edge - badge_w
+        badge_y1 = current_y
+        badge_x2 = badge_right_edge
+        badge_y2 = badge_y1 + badge_h
+        
+        # Draw Rounded Rect
+        try:
+             draw.rounded_rectangle([badge_x1, badge_y1, badge_x2, badge_y2], radius=40, fill=badge_color)
+        except AttributeError:
+             draw.rectangle([badge_x1, badge_y1, badge_x2, badge_y2], fill=badge_color)
+             
+        # Draw English Text (Centered in Badge)
+        center_x_badge = badge_x1 + (badge_w // 2)
+        center_y_badge = badge_y1 + (badge_h // 2)
         
         try:
-            # Canvas 1080x1920
-            img = Image.new('RGB', (1080, 1920), color='#FFFFFF')
-            draw = ImageDraw.Draw(img)
-            
-            # Fonts
-            # English Word: Bigger
-            # Translation: Smaller
-            font_size_word = 130
-            font_size_trans = 90
-            
-            if font_path_main:
-                try:
-                    font_word = ImageFont.truetype(font_path_main, font_size_word)
-                    font_trans = ImageFont.truetype(font_path_main, font_size_trans)
-                except:
-                    font_word = ImageFont.load_default()
-                    font_trans = ImageFont.load_default()
-            else:
-                 font_word = ImageFont.load_default()
-                 font_trans = ImageFont.load_default()
+            draw.text((center_x_badge, center_y_badge), word, font=font_word, fill=text_color_word, anchor="mm")
+        except:
+             # Manual fallback
+             txt_x = center_x_badge - (text_w // 2)
+             txt_y = center_y_badge - (text_h // 2) - 10 
+             draw.text((txt_x, txt_y), word, font=font_word, fill=text_color_word)
 
-            # Colors
-            primary_color = "#4F46E5" # Indigo/Blue
-            text_color_word = "#FFFFFF" # White
-            text_color_trans = "#222222" # Dark Grey/Black
-            
-            # --- Layout Calculations ---
-            # Word Center Y = 42% of 1920 ~= 806
-            # Trans Center Y = 58% of 1920 ~= 1114
-            
-            y_center_word = 806
-            y_center_trans = 1114
-            
-            # 1. Draw English Word (Badge Style)
-            # Calculate text size
-            bbox_word = draw.textbbox((0, 0), word, font=font_word)
-            w_word = bbox_word[2] - bbox_word[0]
-            h_word = bbox_word[3] - bbox_word[1]
-            
-            # Badge dimensions with padding
-            pad_x = 60
-            pad_y = 40
-            badge_w = w_word + (pad_x * 2)
-            badge_h = h_word + (pad_y * 2)
-            
-            badge_x1 = (1080 - badge_w) // 2
-            badge_y1 = y_center_word - (badge_h // 2)
-            badge_x2 = badge_x1 + badge_w
-            badge_y2 = badge_y1 + badge_h
-            
-            # Draw Badge (Rounded Rectangle)
-            try:
-                draw.rounded_rectangle([badge_x1, badge_y1, badge_x2, badge_y2], radius=40, fill=primary_color)
-            except AttributeError:
-                # Fallback for older Pillow versions
-                draw.rectangle([badge_x1, badge_y1, badge_x2, badge_y2], fill=primary_color)
-            
-            # Draw Word Text (Centered in Badge)
-            # Note: aligning text perfectly can be tricky with ascenders/descenders. 
-            # Using basic centering logic here.
-            text_x_word = (1080 - w_word) // 2
-            text_y_word = y_center_word - (h_word // 2)
-            draw.text((text_x_word, text_y_word - 10), word, font=font_word, fill=text_color_word) 
-            # -10 fix for visual centering often needed with PIL fonts
-
-            # 2. Draw Translation (Simple Text)
-            bbox_trans = draw.textbbox((0, 0), translation, font=font_trans)
-            w_trans = bbox_trans[2] - bbox_trans[0]
-            h_trans = bbox_trans[3] - bbox_trans[1]
-            
-            text_x_trans = (1080 - w_trans) // 2
-            text_y_trans = y_center_trans - (h_trans // 2)
-            
-            draw.text((text_x_trans, text_y_trans), translation, font=font_trans, fill=text_color_trans)
-            
-            img.save(card_path)
-            
-            generated_assets.append({
-                "index": i,
-                "word": word,
-                "audio": audio_path,
-                "image": card_path
-            })
-            
-        except Exception as e:
-            st.error(f"Image gen failed for '{word}': {e}")
-            
-        progress_bar.progress((i + 1) / total)
+        # 2. Right Side: Italian Translation
+        # Position: Left aligned to spine (X = center_axis_x + center_gap)
+        # Vertical: Centered relative to the Badge center
         
-    return generated_assets
+        trans_x = center_axis_x + center_gap
+        trans_y_center = center_y_badge # Align with badge center
+        
+        try:
+            draw.text((trans_x, trans_y_center), translation, font=font_trans, fill=text_color_trans, anchor="lm") # Left-Middle alignment
+        except:
+            # Fallback for older Pillow
+            bbox_t = draw.textbbox((0, 0), translation, font=font_trans)
+            trans_h = bbox_t[3] - bbox_t[1]
+            draw.text((trans_x, trans_y_center - (trans_h // 2)), translation, font=font_trans, fill=text_color_trans)
+
+    # Save Summary Image
+    summary_path = os.path.abspath(os.path.join(temp_dir, "vocab_summary_slide.png"))
+    img.save(summary_path)
+    
+    # Concatenate Audio
+    full_mix_path = os.path.abspath(os.path.join(temp_dir, "vocab_full_mix.mp3"))
+    if audio_clips:
+        try:
+            final_audio = concatenate_audioclips(audio_clips)
+            final_audio.write_audiofile(full_mix_path, fps=44100, logger=None)
+        except Exception as e:
+            st.error(f"Audio concatenation failed: {e}")
+            logger.error(f"Audio concatenation failed: {e}", exc_info=True)
+            full_mix_path = None
+    else:
+        full_mix_path = None
+        
+    return {
+        "summary_slide": summary_path,
+        "full_audio": full_mix_path
+    }
 
 def create_vocab_video_sequence(assets):
     """
-    Phase 2: Video Sequence Assembly
-    Uses MoviePy to create the closing segment.
+    Phase 2: Video Sequence - Single Slide
     """
-    st.info("Assembling Vocabulary Sequence...")
+    st.info("Assembling Vocabulary Summary...")
     
-    vocab_clips = []
-    
-    # 1. Intro Stinger
-    intro_path = "assets/vocabulary.png"
-    if os.path.exists(intro_path):
-        try:
-            intro_clip = ImageClip(intro_path).with_duration(2.0)
-            vocab_clips.append(intro_clip)
-        except Exception as e:
-            st.warning(f"Could not load intro stinger: {e}")
-    else:
-        st.warning(f"Intro stinger not found at {intro_path}")
-
-    # 2. Cards Loop
-    for item in assets:
-        img_path = item['image']
-        audio_path = item['audio']
+    if not assets or not assets.get("summary_slide") or not assets.get("full_audio"):
+        st.error("Missing vocab assets for sequence.")
+        logger.error("Missing vocab assets for sequence.")
+        return None
         
-        if not os.path.exists(img_path) or not os.path.exists(audio_path):
-            continue
-            
-        try:
-            # Base Clip (Image) - 2.5s
-            base_clip = ImageClip(img_path).with_duration(2.5)
-            
-            # Audio
-            audio_clip = AudioFileClip(audio_path)
-            # Start audio at 0? Or delayed?
-            # "Pronouncing only the English word". Usually short.
-            # Let's set it to start at 0.
-            base_clip = base_clip.with_audio(audio_clip)
-            
-            # Reveal Mask (ColorClip)
-            # White box covering bottom 50%
-            # Duration: 0.0s to 1.2s (Reveal at 1.2s)
-            # Geometry: 1080x960, pos=(0, 960)
-            
-            mask_clip = ColorClip(size=(1080, 960), color=(255, 255, 255))
-            mask_clip = mask_clip.with_position((0, 960))
-            mask_clip = mask_clip.with_start(0).with_duration(1.2)
-            
-            # Composite
-            final_card_clip = CompositeVideoClip([base_clip, mask_clip], size=(1080, 1920))
-            final_card_clip = final_card_clip.with_duration(2.5) # Enforce 2.5s
-            
-            vocab_clips.append(final_card_clip)
-            
-        except Exception as e:
-            st.error(f"Failed to create clip for item {item['index']}: {e}")
-
-    # 3. Concatenate
-    if vocab_clips:
-        try:
-            final_vocab_sequence = concatenate_videoclips(vocab_clips, method="compose")
-            return final_vocab_sequence
-        except Exception as e:
-            st.error(f"Error concatenating vocab clips: {e}")
-            return None
-    else:
+    img_path = assets["summary_slide"]
+    audio_path = assets["full_audio"]
+    
+    try:
+        # Load Audio to get duration
+        audio_clip = AudioFileClip(audio_path)
+        duration = audio_clip.duration
+        
+        # Create Image Clip with exact duration
+        # Add a small buffer to duration if needed, or exact match
+        video_clip = ImageClip(img_path).with_duration(duration)
+        video_clip = video_clip.with_audio(audio_clip)
+        
+        return video_clip
+        
+    except Exception as e:
+        st.error(f"Failed to create vocab sequence: {e}")
+        logger.error(f"Failed to create vocab sequence: {e}", exc_info=True)
         return None
 
