@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 
 import logging
+import time
 
 # Load environment variables
 load_dotenv()
@@ -92,40 +93,10 @@ def generate_dual_scripts(raw_text):
         model = genai.GenerativeModel(config['gemini_model'])
 
         # --- CALL A: SOCIAL SCRIPT ---
-        logger.info("Generating Social Script (Call A)...")
-        social_prompt = """
-        You are a Script Editor for short-form educational videos (TikTok/Reels). INPUT: Raw English text from a lesson. GOAL: Convert this into a fast dialogue script.
-    
-        RULES:
-        1. REMOVE SPEECH TAGS: Delete "he said", "she asked", "Margot says". Convert strictly to direct speech.
-        2. PRESERVE KEYWORDS: You MUST keep the specific vocabulary used in the text.
-        3. CONDENSE NARRATION: Remove narrations unless absolutely critical for context. Focus on dialogue.
-        4. CHARACTER MAPPING: Assign lines to: "Herbert", "Margot", "Brian", "Laura", "Molly", or "Narrator".
-    
-        OUTPUT: A JSON object with a single key social_script: [{"speaker": "Margot", "text": "Why are you looking south?"}, ...]
-        """
+        # logger.info("Generating Social Script (Call A)...") 
+        # (Disabled in favor of Truncated Web Script Strategy)
+        # ... [Previous Social Prompt Code Commented Out by User Request] ...
         
-        full_social_prompt = f"{social_prompt}\n\nRAW TEXT:\n{raw_text}"
-        response_social = model.generate_content(full_social_prompt)
-        text_social = response_social.text
-        
-        # Cleanup
-        if text_social.startswith("```json"): text_social = text_social[7:]
-        if text_social.startswith("```"): text_social = text_social[3:]
-        if text_social.endswith("```"): text_social = text_social[:-3]
-        
-        try:
-            social_json = json.loads(text_social)
-            # Normalize keys if needed (prompt asks for 'speaker')
-            raw_social = social_json.get("social_script", [])
-            for item in raw_social:
-                 # Ensure keys are speaker/text
-                 s = item.get("speaker") or item.get("character")
-                 t = item.get("text")
-                 social_script.append({"speaker": s, "text": t})
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON Error (Social): {e}")
-
         # --- CALL B: WEB SCRIPT ---
         logger.info("Generating Web Script (Call B)...")
         web_prompt = """
@@ -136,12 +107,7 @@ def generate_dual_scripts(raw_text):
         2. NARRATOR: Explicitly tag descriptive text as speaker: "Narrator".
         3. CHARACTERS: Tag dialogue with the character's name.
         4. VERBATIM: Keep the text EXACTLY as it is in the input. Do not summarize. Retrieve every sentence.
-        5. REMOVE SPEECH TAGS? No, for the Web Script we want the verbatim story, but usually for a video script we want "clean" dialogue. 
-           Wait, User said "Verbatim transcript... Strictly for Listening Challenges".
-           user prompt: "Web Video (Website Lesson): Educational, verbatim transcript, includes the Narrator... Explicitly tag role: 'Narrator' for descriptive text and role: 'Character' for dialogue."
-           However, standard logic implies if we want to build a video from this, we probably separate speaker name from text.
-           Let's assume "Verbatim" means don't shorten it, but still parse it into structural JSON.
-           
+        
         OUTPUT: A JSON object with a single key web_script: [{"speaker": "Narrator", "text": "Herbert looks at the map."}, {"speaker": "Herbert", "text": "I am lost."}]
         """
         
@@ -159,6 +125,9 @@ def generate_dual_scripts(raw_text):
              web_script = web_json.get("web_script", [])
         except json.JSONDecodeError as e:
             logger.error(f"JSON Error (Web): {e}")
+            
+        # Social Script Strategy: Truncated Version of Web Script (First 6 lines)
+        social_script = web_script[:6]
             
         return social_script, web_script
 
@@ -937,34 +906,71 @@ def create_title_card(text):
     img.save(output_path)
     return output_path
 
+def format_time(seconds):
+    """
+    Helper to convert seconds into readable string (e.g., "1m 30s" or "45s").
+    """
+    m, s = divmod(int(seconds), 60)
+    if m > 0:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
 def generate_video(parsed_script):
     """
     Step 2: Generate Video (Modules B, C, D)
     Main orchestration loop.
-    Updated for Listening Challenge Structure.
+    Updated for Listening Challenge Structure + Smart Timer & ETR.
     """
     status_text = st.empty()
     main_progress = st.progress(0)
+    start_time = time.time()
+    
+    def update_status(progress, text):
+        """
+        Updates progress bar and status text with ETR.
+        """
+        elapsed = time.time() - start_time
+        
+        # Calculate ETR
+        # progress is 0.0 to 1.0
+        # Avoid division by zero
+        if progress > 0.01:
+            estimated_total = elapsed / progress
+            remaining = estimated_total - elapsed
+            if remaining < 0: remaining = 0
+            
+            elapsed_str = format_time(elapsed)
+            remaining_str = format_time(remaining)
+            
+            display_text = f"{text} | ⏳ Elapsed: {elapsed_str} | 🏁 Est. Remaining: {remaining_str}"
+        else:
+            elapsed_str = format_time(elapsed)
+            display_text = f"{text} | ⏳ Elapsed: {elapsed_str} | 🏁 Est. Remaining: Calculating..."
+            
+        status_text.text(display_text)
+        main_progress.progress(progress)
+
+    # --- Part 1: Social Video (0% - 60%) ---
     
     # 1. Active Roster
-    status_text.text("Step 1: Determining active roster...")
+    update_status(0.02, "Step 1: Determining active roster...")
     roster = get_active_roster(parsed_script)
     st.write(f"Active Characters: {roster}")
-    main_progress.progress(5)
+    update_status(0.05, "Step 1: Roster determined.")
     
     # 2. Audio Generation (Shared)
     if not parsed_script:
         st.error("Script is empty.")
         return
 
-    status_text.text("Step 2: Generating Audio...")
+    update_status(0.05, "Step 2: Generating Audio...")
     # This modifies parsed_script in place with audio paths
     parsed_script_with_audio = generate_audio(parsed_script)
     st.success(f"Audio generated for {len(parsed_script_with_audio)} lines.")
-    main_progress.progress(20)
+    update_status(0.15, "Step 2: Audio complete.")
 
     # --- Part A: Listening Part (Masked) ---
-    status_text.text("Step 3a: Generating Listening Part (Masked)...")
+    update_status(0.15, "Step 3a: Generating Listening Part (Masked)...")
     
     # Deep copy to safe-guard original script
     listening_script = copy.deepcopy(parsed_script_with_audio)
@@ -977,6 +983,7 @@ def generate_video(parsed_script):
     # Generate Frames for Listening
     listening_frames_dir = os.path.join("output", "frames_listening")
     listening_script_with_visuals = generate_frames(listening_script, roster, output_dir=listening_frames_dir)
+    update_status(0.30, "Step 3a: Listening Frames generated.")
     
     # Assemble Listening Part
     listening_video_path = assemble_video(listening_script_with_visuals, output_dir="output", output_filename="listening_part.mp4")
@@ -984,14 +991,15 @@ def generate_video(parsed_script):
         st.error("Failed to generate Listening Part video.")
         return
     st.success("Listening Part generated.")
-    main_progress.progress(50)
+    update_status(0.35, "Step 3a: Listening Part assembled.")
 
     # --- Part B: Reading Part (Normal) ---
-    status_text.text("Step 3b: Generating Reading Part (Normal)...")
+    update_status(0.35, "Step 3b: Generating Reading Part (Normal)...")
     
     # Use original script (already has audio)
     reading_frames_dir = os.path.join("output", "frames_reading")
     reading_script_with_visuals = generate_frames(parsed_script_with_audio, roster, output_dir=reading_frames_dir)
+    update_status(0.45, "Step 3b: Reading Frames generated.")
     
     # Assemble Reading Part
     reading_video_path = assemble_video(reading_script_with_visuals, output_dir="output", output_filename="reading_part.mp4")
@@ -999,10 +1007,10 @@ def generate_video(parsed_script):
         st.error("Failed to generate Reading Part video.")
         return
     st.success("Reading Part generated.")
-    main_progress.progress(80)
+    update_status(0.50, "Step 3b: Reading Part assembled.")
 
     # --- Part C: Final Assembly ---
-    status_text.text("Step 5: Final Montage & Branding...")
+    update_status(0.50, "Step 5: Final Montage & Branding...")
     
     try:
         final_clips = []
@@ -1035,7 +1043,7 @@ def generate_video(parsed_script):
         # 5. Conditional Vocab
         enable_vocab = config.get("ENABLE_VOCAB_SECTION", True)
         if enable_vocab and 'vocab_list' in st.session_state and st.session_state.vocab_list:
-            status_text.text("Adding Vocabulary Section...")
+            update_status(0.53, "Adding Vocabulary Section...")
             vocab_assets = generate_vocab_assets(st.session_state.vocab_list)
             if vocab_assets:
                 vocab_clip = create_vocab_video_sequence(vocab_assets)
@@ -1066,16 +1074,15 @@ def generate_video(parsed_script):
             st.warning("Overlay image not found (assets/NoBackground.png).")
 
         # F. Background Music (New Step)
-        # F. Background Music (New Step)
         if config.get("ENABLE_MUSIC", False):
+            update_status(0.55, "Adding Background Music...")
             st.info("Adding Background Music...")
             final_combined = add_background_music(final_combined)
         else:
             st.info("Skipping Background Music (Optional).")
 
         # G. Export
-
-        # F. Export
+        update_status(0.58, "Exporting Social Video...")
         final_output_path = os.path.abspath(os.path.join("output", "final_video_complete.mp4"))
         final_combined.write_videofile(
             final_output_path, 
@@ -1091,14 +1098,13 @@ def generate_video(parsed_script):
         st.error(f"Critical Error in Montage/Export: {e}")
         logger.error(f"Critical Error in Montage/Export: {e}", exc_info=True)
     
-    main_progress.progress(100)
-    status_text.text("Social Video Finished.")
+    update_status(0.60, "Social Video Finished.")
     
-    # --- STEP B: Web Video Generation ---
+    # --- STEP B: Web Video Generation (60% - 100%) ---
     if 'script_web' in st.session_state and st.session_state.script_web:
         st.markdown("---")
         st.header("Generating Web Video (Step B)...")
-        status_text.text("Initializing Web Video Generation...")
+        update_status(0.61, "Initializing Web Video Generation...")
         
         web_script = copy.deepcopy(st.session_state.script_web)
         
@@ -1109,16 +1115,19 @@ def generate_video(parsed_script):
             
             # 2. Generate Assets
             # Audio
+            update_status(0.70, "Generating Web Audio...")
             st.info("Generating Web Audio...")
             audio_output_dir = os.path.join("output", "audio_web")
             web_script_with_audio = generate_audio(web_script, output_dir=audio_output_dir)
             
             # Frames
+            update_status(0.85, "Generating Web Visuals...")
             st.info("Generating Web Visuals...")
             frames_web_dir = os.path.join("output", "frames_web")
             web_script_with_visuals = generate_frames(web_script_with_audio, web_roster, output_dir=frames_web_dir)
             
             # 3. Assemble Story Clip (Narrator + Dialogue)
+            update_status(0.90, "Assembling Web Story...")
             st.info("Assembling Web Story...")
             story_video_path = assemble_video(
                 web_script_with_visuals, 
@@ -1143,10 +1152,12 @@ def generate_video(parsed_script):
                 final_web_clips.append(story_clip)
                 
                 # Concatenate
+                update_status(0.95, "Concatenating Web Video...")
                 st.info("Concatenating Web Video...")
                 final_web_video = concatenate_videoclips(final_web_clips)
                 
                 # 5. Export (Web Video)
+                update_status(0.98, "Exporting Web Video...")
                 web_output_path = os.path.abspath(os.path.join("output", "Web_Video.mp4"))
                 final_web_video.write_videofile(
                     web_output_path,
@@ -1157,6 +1168,7 @@ def generate_video(parsed_script):
                 
                 st.success("Web Video Generated Successfully!")
                 st.video(web_output_path)
+                update_status(1.0, "Process Finished!")
             else:
                 st.error("Failed to assemble Web Story video.")
                 
@@ -1164,7 +1176,8 @@ def generate_video(parsed_script):
             st.error(f"Error generating Web Video: {e}")
             logger.error(f"Error generating Web Video: {e}", exc_info=True)
             
-    status_text.text("Process Finished.")
+    else:
+        update_status(1.0, "Process Finished!")
 
 # --- Streamlit UI ---
 
@@ -1258,11 +1271,11 @@ def main():
         st.write("---")
         # 2a. Generate Dual Scripts Button
         st.write("---")
-        if st.button("Step 2: Generate Scripts (Social & Web)"):
+        if st.button("Step 2: Generate Web Script"):
              # Ensure we have the original text safely
              source_text = st.session_state.get('original_clean_text', final_script_text)
              
-             with st.spinner("Generating Dual Scripts (Social & Web)..."):
+             with st.spinner("Generating Web Script..."):
                  social, web = generate_dual_scripts(source_text)
                  
                  if social:
@@ -1272,7 +1285,7 @@ def main():
                      st.session_state.script_web = web
                      
                  if social and web:
-                     st.success("Both Scripts Generated Successfully!")
+                     st.success("Web Script Generated (Social Teaser Auto-Derived)!")
                  elif social:
                      st.warning("Only Social Script generated.")
                  elif web:
@@ -1283,21 +1296,10 @@ def main():
         # Stacked Editors (Vertical Layout)
         if 'script_social' in st.session_state or 'script_web' in st.session_state:
             
-            st.subheader("Social Script (TikTok/Shorts)")
-            if 'script_social' in st.session_state:
-                # Use Full Width
-                edited_social = st.data_editor(
-                    st.session_state.script_social, 
-                    num_rows="dynamic", 
-                    key='social_editor',
-                    use_container_width=True
-                )
-                st.session_state.script_social = edited_social
-                st.session_state.parsed_script = edited_social # Sync for compatibility
+            # st.subheader("Social Script (TikTok/Shorts)") 
+            # (HIDDEN as per requirements - Derived from Web Script)
             
-            st.divider() 
-            
-            st.subheader("Web Script (Verbatim)")
+            st.subheader("Script Editor (Full Story)")
             if 'script_web' in st.session_state:
                 # Use Full Width
                 edited_web = st.data_editor(
@@ -1307,6 +1309,10 @@ def main():
                     use_container_width=True
                 )
                 st.session_state.script_web = edited_web
+                
+                # DERIVE Social Script for generation downstream (First 6 lines of Edited Web Script)
+                st.session_state.script_social = edited_web[:6]
+                st.session_state.parsed_script = st.session_state.script_social
 
     # Placeholder for session state to store parsed script
     if 'parsed_script' not in st.session_state:
