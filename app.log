@@ -1,0 +1,170 @@
+2025-12-15 23:00:09,611 - __main__ - INFO - Starting visual generation...
+2025-12-15 23:00:11,602 - __main__ - INFO - Starting video assembly...
+2025-12-15 23:00:21,741 - vocab_functions - INFO - Generating Vocabulary Assets (Summary Slide)...
+2025-12-15 23:28:23,909 - __main__ - INFO - Starting visual generation...
+2025-12-15 23:28:25,548 - __main__ - INFO - Starting video assembly...
+2025-12-15 23:28:33,685 - vocab_functions - INFO - Generating Vocabulary Assets (Summary Slide)...
+2025-12-16 16:53:24,607 - __main__ - INFO - Starting visual generation...
+2025-12-16 16:53:26,393 - __main__ - INFO - Starting video assembly...
+2025-12-16 16:53:32,661 - __main__ - INFO - Starting visual generation...
+2025-12-16 16:53:34,324 - __main__ - INFO - Starting video assembly...
+2025-12-16 16:53:40,374 - __main__ - ERROR - Critical Error in Montage/Export: 'ImageClip' object has no attribute 'set_duration'
+Traceback (most recent call last):
+  File "C:\Francesco\Source\create-video\app.py", line 943, in generate_video
+    separator_clip = create_separator_clip(output_dir="output")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Francesco\Source\create-video\app.py", line 854, in create_separator_clip
+    clip = ImageClip(filepath).set_duration(1.0)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ImageClip' object has no attribute 'set_duration'. Did you mean: 'with_duration'?
+2025-12-16 16:57:32,026 - __main__ - INFO - Starting visual generation...
+2025-12-16 16:57:33,510 - __main__ - INFO - Starting video assembly...
+2025-12-16 16:57:38,655 - __main__ - INFO - Starting visual generation...
+2025-12-16 16:57:40,098 - __main__ - INFO - Starting video assembly...
+2025-12-16 16:57:46,161 - vocab_functions - INFO - Generating Vocabulary Assets (Summary Slide)...
+2025-12-16 17:27:52,640 - __main__ - INFO - Starting visual generation...
+2025-12-16 17:27:54,316 - __main__ - INFO - Starting video assembly...
+2025-12-16 17:28:01,039 - __main__ - INFO - Starting visual generation...
+2025-12-16 17:28:02,935 - __main__ - INFO - Starting video assembly...
+2025-12-16 17:28:13,426 - vocab_functions - INFO - Generating Vocabulary Assets (Summary Slide)...
+2025-12-16 17:28:20,149 - __main__ - INFO - Adding background music: background-music-2.mp3
+2025-12-16 21:36:31,314 - __main__ - INFO - Generating Social Script (Call A)...
+2025-12-16 21:36:33,773 - __main__ - INFO - Generating Web Script (Call B)...
+2025-12-16 21:50:15,530 - __main__ - INFO - Generating Social Script (Call A)...
+2025-12-16 21:50:17,842 - __main__ - INFO - Generating Web Script (Call B)...
+2025-12-16 21:50:45,278 - __main__ - INFO - Starting visual generation...
+2025-12-16 21:50:47,614 - __main__ - INFO - Starting video assembly...
+2025-12-16 21:51:33,060 - __main__ - INFO - Starting visual generation...
+2025-12-16 21:51:33,069 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 21:51:33,070 - PIL.PngImagePlugin - DEBUG - STREAM b'sRGB' 41 1
+2025-12-16 21:51:33,070 - PIL.PngImagePlugin - DEBUG - STREAM b'gAMA' 54 4
+2025-12-16 21:51:33,071 - PIL.PngImagePlugin - DEBUG - STREAM b'pHYs' 70 9
+2025-12-16 21:51:33,071 - PIL.PngImagePlugin - DEBUG - STREAM b'iTXt' 91 1373
+2025-12-16 21:51:33,072 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 1476 2678
+2025-12-16 21:51:33,096 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 21:51:33,097 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 41 8192
+2025-12-16 21:51:33,102 - PIL.PngImagePlugin - DEBUG - STREAM b'deBG' 47302 16
+2025-12-16 21:51:33,102 - PIL.PngImagePlugin - DEBUG - b'deBG' 47302 16 (unknown)
+2025-12-16 21:51:33,132 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 21:51:33,133 - PIL.PngImagePlugin - DEBUG - STREAM b'PLTE' 41 768
+2025-12-16 21:51:33,133 - PIL.PngImagePlugin - DEBUG - STREAM b'tRNS' 821 254
+2025-12-16 21:51:33,134 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 1087 8192
+2025-12-16 21:51:33,167 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 21:51:33,167 - PIL.PngImagePlugin - DEBUG - STREAM b'PLTE' 41 768
+2025-12-16 21:51:33,168 - PIL.PngImagePlugin - DEBUG - STREAM b'tRNS' 821 244
+2025-12-16 21:51:33,168 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 1077 8192
+2025-12-16 21:51:33,205 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 21:51:33,205 - PIL.PngImagePlugin - DEBUG - STREAM b'PLTE' 41 768
+2025-12-16 21:51:33,206 - PIL.PngImagePlugin - DEBUG - STREAM b'tRNS' 821 233
+2025-12-16 21:51:33,206 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 1066 8192
+2025-12-16 21:51:33,347 - __main__ - DEBUG - Frame 0: Balloon Y=328, Text Y=467, Color=#000000
+2025-12-16 21:51:33,607 - __main__ - DEBUG - Frame 1: Balloon Y=328, Text Y=467, Color=#000000
+2025-12-16 21:51:33,859 - __main__ - DEBUG - Frame 2: Balloon Y=328, Text Y=467, Color=#000000
+2025-12-16 21:51:34,110 - __main__ - DEBUG - Frame 3: Balloon Y=328, Text Y=467, Color=#000000
+2025-12-16 21:51:34,359 - __main__ - DEBUG - Frame 4: Balloon Y=328, Text Y=467, Color=#000000
+2025-12-16 21:51:34,609 - __main__ - DEBUG - Frame 5: Balloon Y=328, Text Y=467, Color=#000000
+2025-12-16 21:51:34,860 - __main__ - DEBUG - Frame 6: Balloon Y=328, Text Y=467, Color=#000000
+2025-12-16 21:51:35,110 - __main__ - DEBUG - Frame 7: Balloon Y=328, Text Y=467, Color=#000000
+2025-12-16 21:51:35,269 - __main__ - INFO - Starting video assembly...
+2025-12-16 21:51:45,079 - __main__ - INFO - Starting visual generation...
+2025-12-16 21:51:45,087 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 21:51:45,087 - PIL.PngImagePlugin - DEBUG - STREAM b'sRGB' 41 1
+2025-12-16 21:51:45,087 - PIL.PngImagePlugin - DEBUG - STREAM b'gAMA' 54 4
+2025-12-16 21:51:45,089 - PIL.PngImagePlugin - DEBUG - STREAM b'pHYs' 70 9
+2025-12-16 21:51:45,089 - PIL.PngImagePlugin - DEBUG - STREAM b'iTXt' 91 1373
+2025-12-16 21:51:45,090 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 1476 2678
+2025-12-16 21:51:45,120 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 21:51:45,121 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 41 8192
+2025-12-16 21:51:45,123 - PIL.PngImagePlugin - DEBUG - STREAM b'deBG' 47302 16
+2025-12-16 21:51:45,123 - PIL.PngImagePlugin - DEBUG - b'deBG' 47302 16 (unknown)
+2025-12-16 21:51:45,157 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 21:51:45,157 - PIL.PngImagePlugin - DEBUG - STREAM b'PLTE' 41 768
+2025-12-16 21:51:45,158 - PIL.PngImagePlugin - DEBUG - STREAM b'tRNS' 821 254
+2025-12-16 21:51:45,158 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 1087 8192
+2025-12-16 21:51:45,193 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 21:51:45,193 - PIL.PngImagePlugin - DEBUG - STREAM b'PLTE' 41 768
+2025-12-16 21:51:45,194 - PIL.PngImagePlugin - DEBUG - STREAM b'tRNS' 821 244
+2025-12-16 21:51:45,194 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 1077 8192
+2025-12-16 21:51:45,227 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 21:51:45,227 - PIL.PngImagePlugin - DEBUG - STREAM b'PLTE' 41 768
+2025-12-16 21:51:45,228 - PIL.PngImagePlugin - DEBUG - STREAM b'tRNS' 821 233
+2025-12-16 21:51:45,228 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 1066 8192
+2025-12-16 21:51:45,375 - __main__ - DEBUG - Frame 0: Balloon Y=328, Text Y=442, Color=#000000
+2025-12-16 21:51:45,672 - __main__ - DEBUG - Frame 1: Balloon Y=328, Text Y=442, Color=#000000
+2025-12-16 21:51:45,939 - __main__ - DEBUG - Frame 2: Balloon Y=328, Text Y=417, Color=#000000
+2025-12-16 21:51:46,232 - __main__ - DEBUG - Frame 3: Balloon Y=328, Text Y=462, Color=#000000
+2025-12-16 21:51:46,481 - __main__ - DEBUG - Frame 4: Balloon Y=328, Text Y=442, Color=#000000
+2025-12-16 21:51:46,853 - __main__ - DEBUG - Frame 5: Balloon Y=328, Text Y=442, Color=#000000
+2025-12-16 21:51:47,126 - __main__ - DEBUG - Frame 6: Balloon Y=328, Text Y=437, Color=#000000
+2025-12-16 21:51:47,405 - __main__ - DEBUG - Frame 7: Balloon Y=328, Text Y=442, Color=#000000
+2025-12-16 21:51:47,577 - __main__ - INFO - Starting video assembly...
+2025-12-16 21:51:58,184 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 21:51:58,184 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 41 21503
+2025-12-16 21:51:58,215 - PIL.Image - DEBUG - Error closing: Operation on closed image
+2025-12-16 21:51:58,594 - vocab_functions - INFO - Generating Vocabulary Assets (Summary Slide)...
+2025-12-16 21:51:58,598 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 21:51:58,599 - PIL.PngImagePlugin - DEBUG - STREAM b'sRGB' 41 1
+2025-12-16 21:51:58,599 - PIL.PngImagePlugin - DEBUG - STREAM b'gAMA' 54 4
+2025-12-16 21:51:58,599 - PIL.PngImagePlugin - DEBUG - STREAM b'pHYs' 70 9
+2025-12-16 21:51:58,600 - PIL.PngImagePlugin - DEBUG - STREAM b'iTXt' 91 1357
+2025-12-16 21:51:58,600 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 1460 64076
+2025-12-16 21:51:58,654 - asyncio - DEBUG - Using selector: SelectSelector
+2025-12-16 21:51:59,823 - asyncio - DEBUG - Using selector: SelectSelector
+2025-12-16 21:52:00,820 - asyncio - DEBUG - Using selector: SelectSelector
+2025-12-16 21:52:02,072 - asyncio - DEBUG - Using selector: SelectSelector
+2025-12-16 21:52:03,180 - asyncio - DEBUG - Using selector: SelectSelector
+2025-12-16 21:52:04,730 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 21:52:04,730 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 41 65536
+2025-12-16 21:52:04,780 - PIL.Image - DEBUG - Error closing: Operation on closed image
+2025-12-16 21:52:04,881 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 21:52:04,882 - PIL.PngImagePlugin - DEBUG - STREAM b'sRGB' 41 1
+2025-12-16 21:52:04,883 - PIL.PngImagePlugin - DEBUG - STREAM b'gAMA' 54 4
+2025-12-16 21:52:04,884 - PIL.PngImagePlugin - DEBUG - STREAM b'pHYs' 70 9
+2025-12-16 21:52:04,884 - PIL.PngImagePlugin - DEBUG - STREAM b'iTXt' 91 1400
+2025-12-16 21:52:04,885 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 1503 37173
+2025-12-16 21:52:04,933 - PIL.Image - DEBUG - Error closing: Operation on closed image
+2025-12-16 22:01:08,025 - __main__ - INFO - Starting visual generation...
+2025-12-16 22:01:08,038 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 22:01:08,039 - PIL.PngImagePlugin - DEBUG - STREAM b'sRGB' 41 1
+2025-12-16 22:01:08,039 - PIL.PngImagePlugin - DEBUG - STREAM b'gAMA' 54 4
+2025-12-16 22:01:08,039 - PIL.PngImagePlugin - DEBUG - STREAM b'pHYs' 70 9
+2025-12-16 22:01:08,040 - PIL.PngImagePlugin - DEBUG - STREAM b'iTXt' 91 1373
+2025-12-16 22:01:08,040 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 1476 2678
+2025-12-16 22:01:08,074 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 22:01:08,074 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 41 8192
+2025-12-16 22:01:08,079 - PIL.PngImagePlugin - DEBUG - STREAM b'deBG' 47302 16
+2025-12-16 22:01:08,083 - PIL.PngImagePlugin - DEBUG - b'deBG' 47302 16 (unknown)
+2025-12-16 22:01:08,226 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 22:01:08,246 - PIL.PngImagePlugin - DEBUG - STREAM b'PLTE' 41 768
+2025-12-16 22:01:08,278 - PIL.PngImagePlugin - DEBUG - STREAM b'tRNS' 821 254
+2025-12-16 22:01:08,290 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 1087 8192
+2025-12-16 22:01:08,540 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 22:01:08,592 - PIL.PngImagePlugin - DEBUG - STREAM b'PLTE' 41 768
+2025-12-16 22:01:08,608 - PIL.PngImagePlugin - DEBUG - STREAM b'tRNS' 821 244
+2025-12-16 22:01:08,618 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 1077 8192
+2025-12-16 22:01:08,678 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 22:01:08,680 - PIL.PngImagePlugin - DEBUG - STREAM b'PLTE' 41 768
+2025-12-16 22:01:08,681 - PIL.PngImagePlugin - DEBUG - STREAM b'tRNS' 821 233
+2025-12-16 22:01:08,681 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 1066 8192
+2025-12-16 22:01:08,824 - __main__ - DEBUG - Frame 0: Balloon Y=328, Text Y=442, Color=#000000
+2025-12-16 22:01:09,095 - __main__ - DEBUG - Frame 1: Balloon Y=328, Text Y=442, Color=#000000
+2025-12-16 22:01:09,417 - __main__ - DEBUG - Frame 2: Balloon Y=328, Text Y=442, Color=#000000
+2025-12-16 22:01:09,727 - __main__ - DEBUG - Frame 3: Balloon Y=328, Text Y=462, Color=#000000
+2025-12-16 22:01:10,006 - __main__ - DEBUG - Frame 4: Balloon Y=328, Text Y=417, Color=#000000
+2025-12-16 22:01:10,381 - __main__ - DEBUG - Frame 5: Balloon Y=328, Text Y=442, Color=#000000
+2025-12-16 22:01:10,732 - __main__ - DEBUG - Frame 6: Balloon Y=328, Text Y=462, Color=#000000
+2025-12-16 22:01:11,043 - __main__ - DEBUG - Frame 7: Balloon Y=328, Text Y=442, Color=#000000
+2025-12-16 22:01:11,372 - __main__ - DEBUG - Frame 8: Balloon Y=328, Text Y=442, Color=#000000
+2025-12-16 22:01:11,665 - __main__ - DEBUG - Frame 9: Balloon Y=328, Text Y=442, Color=#000000
+2025-12-16 22:01:11,958 - __main__ - DEBUG - Frame 10: Balloon Y=328, Text Y=437, Color=#000000
+2025-12-16 22:01:12,267 - __main__ - DEBUG - Frame 11: Balloon Y=328, Text Y=442, Color=#000000
+2025-12-16 22:01:12,446 - __main__ - INFO - Starting video assembly...
+2025-12-16 22:01:30,082 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 22:01:30,083 - PIL.PngImagePlugin - DEBUG - STREAM b'sRGB' 41 1
+2025-12-16 22:01:30,083 - PIL.PngImagePlugin - DEBUG - STREAM b'gAMA' 54 4
+2025-12-16 22:01:30,083 - PIL.PngImagePlugin - DEBUG - STREAM b'pHYs' 70 9
+2025-12-16 22:01:30,084 - PIL.PngImagePlugin - DEBUG - STREAM b'iTXt' 91 1357
+2025-12-16 22:01:30,084 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 1460 64076
+2025-12-16 22:01:30,406 - PIL.PngImagePlugin - DEBUG - STREAM b'IHDR' 16 13
+2025-12-16 22:01:30,406 - PIL.PngImagePlugin - DEBUG - STREAM b'IDAT' 41 65536
+2025-12-16 22:01:30,443 - PIL.Image - DEBUG - Error closing: Operation on closed image

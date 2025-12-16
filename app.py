@@ -46,8 +46,11 @@ import textwrap
 import uuid
 import ffmpeg
 import edge_tts
+import copy
 import asyncio
-from moviepy import ImageClip, CompositeVideoClip, ColorClip, concatenate_videoclips, AudioFileClip, VideoFileClip
+import random
+from moviepy import ImageClip, CompositeVideoClip, ColorClip, concatenate_videoclips, AudioFileClip, VideoFileClip, CompositeAudioClip
+from moviepy.audio.fx import AudioLoop, AudioFadeOut
 from bs4 import BeautifulSoup
 import re
 from vocab_functions import generate_vocab_assets, create_vocab_video_sequence
@@ -68,139 +71,101 @@ config = load_config()
 
 # --- Placeholder Functions ---
 
-def parse_script(raw_text):
+def generate_dual_scripts(raw_text):
     """
-    Step 1: Parse Script (Module A - Gemini)
+    Step 1 & 2: Dual Brain Logic
+    Generates TWO scripts:
+    1. Social Script (Fast-paced, dialogue only)
+    2. Web Script (Verbatim, full structure)
     """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         st.error("GEMINI_API_KEY not found in environment variables.")
         logger.error("GEMINI_API_KEY not found.")
-        return []
+        return [], []
+
+    social_script = []
+    web_script = []
 
     try:
-        logger.info("Parsing script with Gemini...")
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(config['gemini_model'])
 
-        system_prompt = """
-        You are an expert script parser for a video generation engine.
-        Your task is to convert raw narrative text into a structured JSON list.
+        # --- CALL A: SOCIAL SCRIPT ---
+        logger.info("Generating Social Script (Call A)...")
+        social_prompt = """
+        You are a Script Editor for short-form educational videos (TikTok/Reels). INPUT: Raw English text from a lesson. GOAL: Convert this into a fast dialogue script.
     
-        **Output Format:**
-        A list of objects: `[{"speaker": "Exact Character Name", "text": "Cleaned Dialogue content"}]`
+        RULES:
+        1. REMOVE SPEECH TAGS: Delete "he said", "she asked", "Margot says". Convert strictly to direct speech.
+        2. PRESERVE KEYWORDS: You MUST keep the specific vocabulary used in the text.
+        3. CONDENSE NARRATION: Remove narrations unless absolutely critical for context. Focus on dialogue.
+        4. CHARACTER MAPPING: Assign lines to: "Herbert", "Margot", "Brian", "Laura", "Molly", or "Narrator".
     
-        **Character Mapping Rules (STRICT):**
-        - If the text mentions "Herbert", "Mr. Walker", or "Dad" -> Map speaker to: "Herbert"
-        - If the text mentions "Margot", "Mrs. Walker", or "Mom" -> Map speaker to: "Margot"
-        - If the text mentions "Brian" -> Map speaker to: "Brian"
-        - If the text mentions "Laura" -> Map speaker to: "Laura"
-        - If the text mentions "Molly" -> Map speaker to: "Molly"
-        - If the text describes an action, scene, or context (no spoken words) -> Map speaker to: "Narrator"
-    
-        **Cleaning Rules:**
-        1. Remove all speech tags (e.g., "he said", "Molly asks", "replied Brian").
-        2. Remove quotation marks surrounding the dialogue.
-        3. Keep the dialogue text exactly as spoken.
-        4. For the "Narrator", keep the descriptive text intact.
-    
-        **Example Input:**
-        Brian said, "I am hungry."
-        Molly laughs. "Me too!"
-    
-        **Example Output:**
-        [
-        {"speaker": "Brian", "text": "I am hungry."},
-        {"speaker": "Narrator", "text": "Molly laughs."},
-        {"speaker": "Molly", "text": "Me too!"}
-        ]
-    
-        Return ONLY the valid JSON. No markdown formatting.
+        OUTPUT: A JSON object with a single key social_script: [{"speaker": "Margot", "text": "Why are you looking south?"}, ...]
         """
         
-        full_prompt = f"{system_prompt}\n\nRAW TEXT:\n{raw_text}"
+        full_social_prompt = f"{social_prompt}\n\nRAW TEXT:\n{raw_text}"
+        response_social = model.generate_content(full_social_prompt)
+        text_social = response_social.text
         
-        response = model.generate_content(full_prompt)
+        # Cleanup
+        if text_social.startswith("```json"): text_social = text_social[7:]
+        if text_social.startswith("```"): text_social = text_social[3:]
+        if text_social.endswith("```"): text_social = text_social[:-3]
         
-        # simple cleanup for markdown code blocks if present
-        text_response = response.text
-        if text_response.startswith("```json"):
-            text_response = text_response[7:]
-        if text_response.startswith("```"):
-            text_response = text_response[3:]
-        if text_response.endswith("```"):
-            text_response = text_response[:-3]
+        try:
+            social_json = json.loads(text_social)
+            # Normalize keys if needed (prompt asks for 'speaker')
+            raw_social = social_json.get("social_script", [])
+            for item in raw_social:
+                 # Ensure keys are speaker/text
+                 s = item.get("speaker") or item.get("character")
+                 t = item.get("text")
+                 social_script.append({"speaker": s, "text": t})
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON Error (Social): {e}")
+
+        # --- CALL B: WEB SCRIPT ---
+        logger.info("Generating Web Script (Call B)...")
+        web_prompt = """
+        You are an expert script parser. Your task is to transcribe the ENTIRE story verbatim from the raw text.
+    
+        RULES:
+        1. IDENTIFY SPEAKERS: Identify every line's speaker (Herbert, Margot, Brian, Laura, Molly).
+        2. NARRATOR: Explicitly tag descriptive text as speaker: "Narrator".
+        3. CHARACTERS: Tag dialogue with the character's name.
+        4. VERBATIM: Keep the text EXACTLY as it is in the input. Do not summarize. Retrieve every sentence.
+        5. REMOVE SPEECH TAGS? No, for the Web Script we want the verbatim story, but usually for a video script we want "clean" dialogue. 
+           Wait, User said "Verbatim transcript... Strictly for Listening Challenges".
+           user prompt: "Web Video (Website Lesson): Educational, verbatim transcript, includes the Narrator... Explicitly tag role: 'Narrator' for descriptive text and role: 'Character' for dialogue."
+           However, standard logic implies if we want to build a video from this, we probably separate speaker name from text.
+           Let's assume "Verbatim" means don't shorten it, but still parse it into structural JSON.
+           
+        OUTPUT: A JSON object with a single key web_script: [{"speaker": "Narrator", "text": "Herbert looks at the map."}, {"speaker": "Herbert", "text": "I am lost."}]
+        """
+        
+        full_web_prompt = f"{web_prompt}\n\nRAW TEXT:\n{raw_text}"
+        response_web = model.generate_content(full_web_prompt)
+        text_web = response_web.text
+        
+        # Cleanup
+        if text_web.startswith("```json"): text_web = text_web[7:]
+        if text_web.startswith("```"): text_web = text_web[3:]
+        if text_web.endswith("```"): text_web = text_web[:-3]
+        
+        try:
+             web_json = json.loads(text_web)
+             web_script = web_json.get("web_script", [])
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON Error (Web): {e}")
             
-        parsed_data = json.loads(text_response)
-        logger.info(f"Successfully parsed script. {len(parsed_data)} lines found.")
-        return parsed_data
-        
-    except Exception as e:
-        st.error(f"Error parsing script: {e}")
-        logger.error(f"Error parsing script: {e}", exc_info=True)
-        return []
-
-def generate_social_script(raw_text):
-    """
-    Step 2: Generate Social Script (Module A2 - Gemini Adapter)
-    """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        st.error("GEMINI_API_KEY not found.")
-        logger.error("GEMINI_API_KEY not found.")
-        return []
-
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(config['gemini_model'])
-
-        system_prompt = """
-You are a Script Editor for short-form educational videos (TikTok/Reels). INPUT: Raw English text from a lesson. GOAL: Convert this into a fast dialogue script.
-
-RULES:
-
-    REMOVE SPEECH TAGS: Delete "he said", "she asked", "Margot says". Convert strictly to direct speech.
-
-    PRESERVE KEYWORDS: You MUST keep the specific vocabulary used in the text. Do not simplify "south" to "down" or "library" to "bookstore". The lesson depends on these exact words.
-
-    CONDENSE NARRATION: Shorten long descriptions by the Narrator.
-
-    CHARACTER MAPPING: Assign lines to: "Herbert", "Margot", "Brian", "Laura", or "Narrator".
-
-OUTPUT: A JSON object with a single key social_script: [{"character": "Margot", "text": "Why are you looking south?"}, ...]
-"""
-        
-        full_prompt = f"{system_prompt}\n\nRAW TEXT:\n{raw_text}"
-        
-        response = model.generate_content(full_prompt)
-        
-        text_response = response.text
-        # Clean markdown
-        if text_response.startswith("```json"):
-            text_response = text_response[7:]
-        if text_response.startswith("```"):
-            text_response = text_response[3:]
-        if text_response.endswith("```"):
-            text_response = text_response[:-3]
-            
-        json_data = json.loads(text_response)
-        social_script = json_data.get("social_script", [])
-        
-        # Normalization: Map 'character' to 'speaker' for app compatibility
-        normalized_script = []
-        for item in social_script:
-             speaker = item.get("character")
-             text = item.get("text")
-             # Simple mapping if needed, or just pass through. 
-             # App expects "speaker" key.
-             normalized_script.append({"speaker": speaker, "text": text})
-             
-        return normalized_script
+        return social_script, web_script
 
     except Exception as e:
-        st.error(f"Error generating social script: {e}")
-        logger.error(f"Error generating social script: {e}", exc_info=True)
-        return []
+        st.error(f"Error generating dual scripts: {e}")
+        logger.error(f"Error generating dual scripts: {e}", exc_info=True)
+        return [], []
 
 # --- Helper Functions ---
 
@@ -267,6 +232,10 @@ def clean_html_content(raw_html):
     # Step 0: Extract Vocabulary (before cleaning destroys structure)
     vocab_list = extract_vocabulary(soup)
     
+    # Step 0.5: Extract Lesson Title
+    lesson_title_tag = soup.find('h2')
+    lesson_title = lesson_title_tag.get_text(strip=True) if lesson_title_tag else "Untitled Lesson"
+
     # Step A: Locate Content
     # Look for vocabulary story OR grammar dialogue
     section = soup.find('section', class_='vocabulary-story')
@@ -307,7 +276,7 @@ def clean_html_content(raw_html):
     # Clean up excessive whitespace created by separator
     final_text = re.sub(r'\s+', ' ', final_text).strip()
     
-    return final_text, vocab_list
+    return final_text, vocab_list, lesson_title
 
 def extract_vocabulary(soup):
     """
@@ -350,14 +319,13 @@ def extract_vocabulary(soup):
             
     return vocab_list
 
-def generate_single_audio(text, speaker, index):
+def generate_single_audio(text, speaker, index, output_dir="output"):
     """
     Step 2a: Generate Audio
     - Uses Google Cloud TTS
     - Returns filename and duration
     """
     # Ensure output directory exists
-    output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
 
     # Init Client logic checks
@@ -446,7 +414,7 @@ def generate_single_audio(text, speaker, index):
         
     return filepath, duration
 
-def generate_audio(parsed_script):
+def generate_audio(parsed_script, output_dir="output"):
     """
     2. Audio Generation Logic
     Generates TTS audio for each line using Google Cloud TTS.
@@ -467,7 +435,7 @@ def generate_audio(parsed_script):
             continue
             
         # Call helper
-        filepath, duration = generate_single_audio(text, speaker, i)
+        filepath, duration = generate_single_audio(text, speaker, i, output_dir=output_dir)
         
         if filepath:
             line['audio_file'] = filepath
@@ -479,14 +447,13 @@ def generate_audio(parsed_script):
             
     return updated_script
 
-def generate_frames(parsed_script, roster):
+def generate_frames(parsed_script, roster, output_dir="output"):
     """
     3. Visual Generation Logic (Vertical Ensemble)
     """
     st.info("Step 3: Generating Visuals...")
     logger.info("Starting visual generation...")
     
-    output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
     
     # 1. Config & Assets Setup
@@ -677,7 +644,7 @@ def generate_frames(parsed_script, roster):
 
     return parsed_script
 
-def assemble_video(parsed_script):
+def assemble_video(parsed_script, output_dir="output", output_filename="final_video.mp4"):
     """
     4. Assembly Logic
     Combines frames and audio into video segments, then concatenates them.
@@ -685,7 +652,6 @@ def assemble_video(parsed_script):
     st.info("Step 4: Assembling Video...")
     logger.info("Starting video assembly...")
     
-    output_dir = "output"
     temp_dir = os.path.join(output_dir, "temp")
     os.makedirs(temp_dir, exist_ok=True)
     
@@ -783,7 +749,7 @@ def assemble_video(parsed_script):
         logger.error("No segments created.")
         return None
         
-    final_output = os.path.join(output_dir, "final_video.mp4")
+    final_output = os.path.join(output_dir, output_filename)
     final_output = os.path.abspath(final_output)
     
     st.info(f"Concatenating {len(segment_files)} segments...")
@@ -816,10 +782,166 @@ def assemble_video(parsed_script):
         logger.error(f"Error assembling video: {e}", exc_info=True)
         return None
 
+def create_separator_clip(output_dir="output"):
+    """
+    Creates the 'Check your understanding...' separator clip.
+    Returns an ImageClip (1.0s).
+    """
+    filename = "separator.png"
+    filepath = os.path.join(output_dir, filename)
+    filepath = os.path.abspath(filepath)
+    
+    # Create Image using PIL
+    width, height = 1080, 1920
+    img = Image.new('RGB', (width, height), color='black')
+    draw = ImageDraw.Draw(img)
+    
+    # Load Font - attempt to load a bold font or default large
+    # We'll use the same font as app if possible, or default
+    font_path = config['settings'].get('font_path', 'arial.ttf')
+    try:
+        font = ImageFont.truetype(font_path, 80) # Large size
+    except:
+        font = ImageFont.load_default()
+        
+    text = "Check your understanding..."
+    
+    # Center Text
+    left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+    text_w = right - left
+    text_h = bottom - top
+    x = (width - text_w) // 2
+    y = (height - text_h) // 2
+    
+    draw.text((x, y), text, font=font, fill="white")
+    
+    img.save(filepath)
+    
+    if os.path.exists(filepath):
+        clip = ImageClip(filepath).with_duration(1.0)
+        return clip
+    return None
+
+def add_background_music(video_clip):
+    """
+    Adds background music to a video clip.
+    Picks a random .mp3 from assets/, loops it, sets volume to 12%,
+    and fades out at the end.
+    """
+    assets_dir = "assets"
+    if not os.path.exists(assets_dir):
+        return video_clip
+
+    # Find Audio Files
+    music_files = [f for f in os.listdir(assets_dir) if f.lower().endswith(".mp3")]
+    
+    if not music_files:
+        st.warning("No background music found in assets/")
+        return video_clip
+        
+    # Pick Random
+    bg_music_name = random.choice(music_files)
+    bg_music_path = os.path.join(assets_dir, bg_music_name)
+    logger.info(f"Adding background music: {bg_music_name}")
+    
+    try:
+        # Load Audio
+        music = AudioFileClip(bg_music_path)
+        
+        # Loop if needed
+        # We want the music to cover the full duration
+        # MoviePy v2: use with_effects([AudioLoop(...)])
+        music = music.with_effects([AudioLoop(duration=video_clip.duration)])
+        
+        # Set Volume (12%)
+        music = music.with_volume_scaled(0.12)
+        
+        # Fade Out (2s)
+        # Check if duration > 2s to avoid errors
+        if video_clip.duration > 2:
+             music = music.with_effects([AudioFadeOut(duration=2.0)])
+             
+        # Composite
+        # If video already has audio, mix them.
+        original_audio = video_clip.audio
+        if original_audio:
+            final_audio = CompositeAudioClip([original_audio, music])
+        else:
+            final_audio = music
+            
+        video_clip.audio = final_audio
+        return video_clip
+        
+    except Exception as e:
+        st.warning(f"Failed to add background music: {e}")
+        logger.error(f"Failed to add background music: {e}", exc_info=True)
+        return video_clip
+
+def create_title_card(text):
+    """
+    Creates the title card for the Web Video.
+    Input: The lesson title text.
+    Logic: Load assets/lesson.png as background, draw centered text.
+    Returns: Path to the generated image.
+    """
+    st.info("Creating Title Card...")
+    output_path = os.path.join("output", "temp", "title_card.png")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    # 1. Background
+    bg_path = "assets/lesson.png"
+    target_size = (1080, 1920)
+    
+    try:
+        if os.path.exists(bg_path):
+            img = Image.open(bg_path).convert("RGB")
+            img = ImageOps.fit(img, target_size, method=Image.Resampling.LANCZOS)
+        else:
+             st.warning(f"{bg_path} not found. Using white background.")
+             img = Image.new("RGB", target_size, "white")
+    except Exception as e:
+        logger.error(f"Error loading {bg_path}: {e}")
+        img = Image.new("RGB", target_size, "white")
+        
+    draw = ImageDraw.Draw(img)
+    
+    # 2. Font (Large, Bold)
+    font_path = config['settings'].get('font_path', 'arial.ttf')
+    font_size = 100 
+    try:
+        font = ImageFont.truetype(font_path, font_size)
+    except:
+        font = ImageFont.load_default()
+        
+    # 3. Text Wrapping
+    # Heuristic for char width (approx 0.5 * font_size)
+    avg_char_width = font_size * 0.5
+    # Max width = 80% of 1080 = 864 pixels
+    chars_per_line = int(864 / avg_char_width)
+    if chars_per_line < 10: chars_per_line = 10
+    
+    wrapper = textwrap.TextWrapper(width=chars_per_line)
+    wrapped_text = wrapper.fill(text)
+    
+    # 4. Draw Centered
+    left, top, right, bottom = draw.textbbox((0, 0), wrapped_text, font=font, align="center")
+    text_w = right - left
+    text_h = bottom - top
+    
+    x = (target_size[0] - text_w) // 2
+    y = (target_size[1] - text_h) // 2
+    
+    # Color: Black/Dark Grey
+    draw.multiline_text((x, y), wrapped_text, font=font, fill="#333333", align="center")
+    
+    img.save(output_path)
+    return output_path
+
 def generate_video(parsed_script):
     """
     Step 2: Generate Video (Modules B, C, D)
     Main orchestration loop.
+    Updated for Listening Challenge Structure.
     """
     status_text = st.empty()
     main_progress = st.progress(0)
@@ -828,103 +950,220 @@ def generate_video(parsed_script):
     status_text.text("Step 1: Determining active roster...")
     roster = get_active_roster(parsed_script)
     st.write(f"Active Characters: {roster}")
-    main_progress.progress(10)
+    main_progress.progress(5)
     
-    # 2. Audio Generation
-    if parsed_script:
-        status_text.text("Step 2: Generating Audio...")
-        parsed_script_with_audio = generate_audio(parsed_script)
-        st.success(f"Audio generated for {len(parsed_script_with_audio)} lines.")
-        
-        # 3. Visual Generation
-        status_text.text("Step 3: Generating Visuals...")
-        parsed_script_with_visuals = generate_frames(parsed_script_with_audio, roster)
-        st.success("Visuals generated.")
-        
-        # 4. Assembly
-        status_text.text("Step 4: Assembling Video...")
-        final_video_path = assemble_video(parsed_script_with_visuals)
-        
-        if final_video_path:
-            # 5. Robust Montage Logic (Intro + Main + [Vocab])
-            status_text.text("Step 5: Final Montage & Branding...")
+    # 2. Audio Generation (Shared)
+    if not parsed_script:
+        st.error("Script is empty.")
+        return
+
+    status_text.text("Step 2: Generating Audio...")
+    # This modifies parsed_script in place with audio paths
+    parsed_script_with_audio = generate_audio(parsed_script)
+    st.success(f"Audio generated for {len(parsed_script_with_audio)} lines.")
+    main_progress.progress(20)
+
+    # --- Part A: Listening Part (Masked) ---
+    status_text.text("Step 3a: Generating Listening Part (Masked)...")
+    
+    # Deep copy to safe-guard original script
+    listening_script = copy.deepcopy(parsed_script_with_audio)
+    
+    # Mask text
+    for line in listening_script:
+        if 'text' in line:
+            line['text'] = "..... ? ....."
             
-            try:
-                # A. Prepare Intro
-                intro_path = "assets/intro.mp4"
-                if os.path.exists(intro_path):
-                    intro_clip = VideoFileClip(intro_path)
-                    # Resize/Crop to 1080x1920 to ensure match
-                    # Using resize((1080, 1920)) forces exact dimensions, might stretch if aspect ratio differs
-                    # But per user constraint: "Ensure intro_clip is resized/cropped to 1080x1920"
-                    intro_clip = intro_clip.resized(new_size=(1080, 1920))
-                else:
-                    st.warning(f"Intro video not found at {intro_path}, skipping.")
-                    intro_clip = None
+    # Generate Frames for Listening
+    listening_frames_dir = os.path.join("output", "frames_listening")
+    listening_script_with_visuals = generate_frames(listening_script, roster, output_dir=listening_frames_dir)
+    
+    # Assemble Listening Part
+    listening_video_path = assemble_video(listening_script_with_visuals, output_dir="output", output_filename="listening_part.mp4")
+    if not listening_video_path:
+        st.error("Failed to generate Listening Part video.")
+        return
+    st.success("Listening Part generated.")
+    main_progress.progress(50)
 
-                # B. Main Clip
-                main_clip = VideoFileClip(final_video_path)
-                
-                # Start Clip List
-                final_clips = []
-                if intro_clip:
-                    final_clips.append(intro_clip)
-                final_clips.append(main_clip)
-                
-                # C. Conditional Vocab
-                # Check Config AND Session State
-                enable_vocab = config.get("ENABLE_VOCAB_SECTION", True)
-                if enable_vocab and 'vocab_list' in st.session_state and st.session_state.vocab_list:
-                    status_text.text("Adding Vocabulary Section...")
-                    vocab_assets = generate_vocab_assets(st.session_state.vocab_list)
-                    if vocab_assets:
-                        vocab_clip = create_vocab_video_sequence(vocab_assets)
-                        if vocab_clip:
-                            final_clips.append(vocab_clip)
-                        else:
-                             st.error("Vocabulary Video Sequence failed (None).")
-                    else:
-                         st.error("Vocabulary Assets failed (None).")
-                
-                # D. Concatenate
-                st.info(f"Concatenating {len(final_clips)} clips...")
-                final_combined = concatenate_videoclips(final_clips)
-                
-                # E. Branding Overlay
-                overlay_path = "assets/NoBackground.png"
-                if os.path.exists(overlay_path):
-                    try:
-                        overlay_clip = ImageClip(overlay_path)
-                        overlay_clip = overlay_clip.with_duration(final_combined.duration)
-                        overlay_clip = overlay_clip.with_position(('center', 'bottom'))
-                        
-                        final_combined = CompositeVideoClip([final_combined, overlay_clip])
-                        st.info("Branding Overlay Applied.")
-                    except Exception as e:
-                        st.warning(f"Overlay Error: {e}")
-                else:
-                    st.warning("Overlay image not found (assets/NoBackground.png).")
+    # --- Part B: Reading Part (Normal) ---
+    status_text.text("Step 3b: Generating Reading Part (Normal)...")
+    
+    # Use original script (already has audio)
+    reading_frames_dir = os.path.join("output", "frames_reading")
+    reading_script_with_visuals = generate_frames(parsed_script_with_audio, roster, output_dir=reading_frames_dir)
+    
+    # Assemble Reading Part
+    reading_video_path = assemble_video(reading_script_with_visuals, output_dir="output", output_filename="reading_part.mp4")
+    if not reading_video_path:
+        st.error("Failed to generate Reading Part video.")
+        return
+    st.success("Reading Part generated.")
+    main_progress.progress(80)
 
-                # F. Export
-                combined_path = final_video_path.replace(".mp4", "_final.mp4")
-                final_combined.write_videofile(
-                    combined_path, 
-                    codec="libx264", 
-                    audio_codec="aac",
-                    logger=None 
-                )
-                
-                final_video_path = combined_path
-                st.success("Video Generation Sequence Complete!")
-                st.video(final_video_path)
+    # --- Part C: Final Assembly ---
+    status_text.text("Step 5: Final Montage & Branding...")
+    
+    try:
+        final_clips = []
 
-            except Exception as e:
-                st.error(f"Critical Error in Montage/Export: {e}")
-                logger.error(f"Critical Error in Montage/Export: {e}", exc_info=True)
+        # 1. Intro
+        intro_path = "assets/intro.mp4"
+        if os.path.exists(intro_path):
+            intro_clip = VideoFileClip(intro_path)
+            # Resize/Crop to 1080x1920
+            intro_clip = intro_clip.resized(new_size=(1080, 1920))
+            final_clips.append(intro_clip)
         else:
-            st.error("Video Assembly Failed.")
+            st.warning(f"Intro video not found at {intro_path}, skipping.")
+
+        # 2. Listening Part
+        listening_clip = VideoFileClip(listening_video_path)
+        final_clips.append(listening_clip)
+
+        # 3. Separator
+        separator_clip = create_separator_clip(output_dir="output")
+        if separator_clip:
+             final_clips.append(separator_clip)
+        else:
+             st.warning("Could not create separator clip.")
+
+        # 4. Reading Part
+        reading_clip = VideoFileClip(reading_video_path)
+        final_clips.append(reading_clip)
+        
+        # 5. Conditional Vocab
+        enable_vocab = config.get("ENABLE_VOCAB_SECTION", True)
+        if enable_vocab and 'vocab_list' in st.session_state and st.session_state.vocab_list:
+            status_text.text("Adding Vocabulary Section...")
+            vocab_assets = generate_vocab_assets(st.session_state.vocab_list)
+            if vocab_assets:
+                vocab_clip = create_vocab_video_sequence(vocab_assets)
+                if vocab_clip:
+                    final_clips.append(vocab_clip)
+                else:
+                     st.error("Vocabulary Video Sequence failed (None).")
+            else:
+                 st.error("Vocabulary Assets failed (None).")
+        
+        # D. Concatenate All
+        st.info(f"Concatenating {len(final_clips)} clips...")
+        final_combined = concatenate_videoclips(final_clips)
+        
+        # E. Branding Overlay (Applied to the WHOLE sequence)
+        overlay_path = "assets/NoBackground.png"
+        if os.path.exists(overlay_path):
+            try:
+                overlay_clip = ImageClip(overlay_path)
+                overlay_clip = overlay_clip.with_duration(final_combined.duration)
+                overlay_clip = overlay_clip.with_position(('center', 'bottom'))
+                
+                final_combined = CompositeVideoClip([final_combined, overlay_clip])
+                st.info("Branding Overlay Applied.")
+            except Exception as e:
+                st.warning(f"Overlay Error: {e}")
+        else:
+            st.warning("Overlay image not found (assets/NoBackground.png).")
+
+        # F. Background Music (New Step)
+        # F. Background Music (New Step)
+        if config.get("ENABLE_MUSIC", False):
+            st.info("Adding Background Music...")
+            final_combined = add_background_music(final_combined)
+        else:
+            st.info("Skipping Background Music (Optional).")
+
+        # G. Export
+
+        # F. Export
+        final_output_path = os.path.abspath(os.path.join("output", "final_video_complete.mp4"))
+        final_combined.write_videofile(
+            final_output_path, 
+            codec="libx264", 
+            audio_codec="aac",
+            logger=None 
+        )
+        
+        st.success("Video Generation Sequence Complete!")
+        st.video(final_output_path)
+
+    except Exception as e:
+        st.error(f"Critical Error in Montage/Export: {e}")
+        logger.error(f"Critical Error in Montage/Export: {e}", exc_info=True)
     
     main_progress.progress(100)
+    status_text.text("Social Video Finished.")
+    
+    # --- STEP B: Web Video Generation ---
+    if 'script_web' in st.session_state and st.session_state.script_web:
+        st.markdown("---")
+        st.header("Generating Web Video (Step B)...")
+        status_text.text("Initializing Web Video Generation...")
+        
+        web_script = copy.deepcopy(st.session_state.script_web)
+        
+        try:
+            # 1. Roster for Web Script
+            web_roster = get_active_roster(web_script)
+            st.write(f"Web Active Characters: {web_roster}")
+            
+            # 2. Generate Assets
+            # Audio
+            st.info("Generating Web Audio...")
+            audio_output_dir = os.path.join("output", "audio_web")
+            web_script_with_audio = generate_audio(web_script, output_dir=audio_output_dir)
+            
+            # Frames
+            st.info("Generating Web Visuals...")
+            frames_web_dir = os.path.join("output", "frames_web")
+            web_script_with_visuals = generate_frames(web_script_with_audio, web_roster, output_dir=frames_web_dir)
+            
+            # 3. Assemble Story Clip (Narrator + Dialogue)
+            st.info("Assembling Web Story...")
+            story_video_path = assemble_video(
+                web_script_with_visuals, 
+                output_dir="output", 
+                output_filename="temp_web_story.mp4"
+            )
+            
+            if story_video_path:
+                # 4. Create Title Clip
+                lesson_title = st.session_state.get('lesson_title', "Lesson")
+                title_card_path = create_title_card(lesson_title)
+                
+                final_web_clips = []
+                
+                # Title Clip (3 seconds)
+                if os.path.exists(title_card_path):
+                    title_clip = ImageClip(title_card_path).with_duration(3.0)
+                    final_web_clips.append(title_clip)
+                
+                # Story Clip
+                story_clip = VideoFileClip(story_video_path)
+                final_web_clips.append(story_clip)
+                
+                # Concatenate
+                st.info("Concatenating Web Video...")
+                final_web_video = concatenate_videoclips(final_web_clips)
+                
+                # 5. Export (Web Video)
+                web_output_path = os.path.abspath(os.path.join("output", "Web_Video.mp4"))
+                final_web_video.write_videofile(
+                    web_output_path,
+                    codec="libx264",
+                    audio_codec="aac",
+                    logger=None
+                )
+                
+                st.success("Web Video Generated Successfully!")
+                st.video(web_output_path)
+            else:
+                st.error("Failed to assemble Web Story video.")
+                
+        except Exception as e:
+            st.error(f"Error generating Web Video: {e}")
+            logger.error(f"Error generating Web Video: {e}", exc_info=True)
+            
     status_text.text("Process Finished.")
 
 # --- Streamlit UI ---
@@ -969,15 +1208,18 @@ def main():
     # Button to Clean
     if st.button("Clean & Preview Text"):
         with st.spinner("Cleaning HTML..."):
-            cleaned_text, vocab_list = clean_html_content(raw_html)
+            cleaned_text, vocab_list, lesson_title = clean_html_content(raw_html)
             
             # 1. Update Cleaned Text
             st.session_state.cleaned_text_preview = cleaned_text
             st.session_state.cleaned_text_preview_widget = cleaned_text
             st.session_state.original_clean_text = cleaned_text
             
-            # 2. Update Vocabulary
+            # 2. Update Vocabulary & Title
             st.session_state.vocab_list = vocab_list
+            st.session_state.lesson_title = lesson_title
+            
+            st.write(f"**Lesson Title:** {lesson_title}")
             
             # Simple Type Detection for Feedback
             if raw_html and "vocabulary-story" in raw_html:
@@ -1014,23 +1256,57 @@ def main():
         
         # 2a. Generate Social Script Button
         st.write("---")
-        if st.button("✨ Generate Social Script (Draft)"):
+        # 2a. Generate Dual Scripts Button
+        st.write("---")
+        if st.button("Step 2: Generate Scripts (Social & Web)"):
              # Ensure we have the original text safely
              source_text = st.session_state.get('original_clean_text', final_script_text)
              
-             with st.spinner("Adapting for Social Media (Gemini)..."):
-                 draft = generate_social_script(source_text)
-                 if draft:
-                     st.session_state.social_script_draft = draft
-                     st.session_state.parsed_script = draft # Keep compatibility with Step 2 Video Gen
-                     st.success("Social Script Generated!")
+             with st.spinner("Generating Dual Scripts (Social & Web)..."):
+                 social, web = generate_dual_scripts(source_text)
+                 
+                 if social:
+                     st.session_state.script_social = social
+                     st.session_state.parsed_script = social # Compatibility for Step 3 Video Gen
+                 if web:
+                     st.session_state.script_web = web
+                     
+                 if social and web:
+                     st.success("Both Scripts Generated Successfully!")
+                 elif social:
+                     st.warning("Only Social Script generated.")
+                 elif web:
+                     st.warning("Only Web Script generated.")
+                 else:
+                     st.error("Failed to generate scripts.")
 
-        if 'social_script_draft' in st.session_state:
-             st.subheader("Edit Social Script (Draft)")
-             edited_draft = st.data_editor(st.session_state.social_script_draft, num_rows="dynamic", key='social_draft_editor')
-             # Sync back to social_script_draft AND parsed_script (for video generation)
-             st.session_state.social_script_draft = edited_draft
-             st.session_state.parsed_script = edited_draft
+        # Stacked Editors (Vertical Layout)
+        if 'script_social' in st.session_state or 'script_web' in st.session_state:
+            
+            st.subheader("Social Script (TikTok/Shorts)")
+            if 'script_social' in st.session_state:
+                # Use Full Width
+                edited_social = st.data_editor(
+                    st.session_state.script_social, 
+                    num_rows="dynamic", 
+                    key='social_editor',
+                    use_container_width=True
+                )
+                st.session_state.script_social = edited_social
+                st.session_state.parsed_script = edited_social # Sync for compatibility
+            
+            st.divider() 
+            
+            st.subheader("Web Script (Verbatim)")
+            if 'script_web' in st.session_state:
+                # Use Full Width
+                edited_web = st.data_editor(
+                    st.session_state.script_web, 
+                    num_rows="dynamic", 
+                    key='web_editor',
+                    use_container_width=True
+                )
+                st.session_state.script_web = edited_web
 
     # Placeholder for session state to store parsed script
     if 'parsed_script' not in st.session_state:
@@ -1051,14 +1327,24 @@ def main():
     # Let's keep the Video Gen button section pure.
 
     # 4. Generate Video Button
-    # 4. Generate Video Button
-    if st.button("Step 2: Generate Video"):
-        if st.session_state.parsed_script:
-            generate_video(st.session_state.parsed_script)
-            # Force a re-run or just let the user see the success messages. 
-            # The session state is updated in place.
-        else:
-            st.error("Please parse a script first.")
+    if 'script_social' in st.session_state and st.session_state.script_social:
+        st.write("---")
+        st.header("Step 3: Create Video")
+        
+        use_music = st.checkbox("Add Background Music 🎵", value=False)
+
+        if st.button("Generate Video"):
+            # Update Config
+            config["ENABLE_MUSIC"] = use_music
+
+            # Ensure parsed_script is set (it should be linked to social_script)
+            if st.session_state.parsed_script:
+                generate_video(st.session_state.parsed_script)
+            else:
+                st.error("Script seems empty despite passing checks.")
+    else:
+        st.divider()
+        st.info('👆 Please generate the scripts above to unlock Video Creation.')
 
 if __name__ == "__main__":
     main()
