@@ -46,6 +46,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
 import textwrap
 import uuid
 import ffmpeg
+import shutil
 import edge_tts
 import copy
 import asyncio
@@ -846,6 +847,44 @@ def add_background_music(video_clip):
         logger.error(f"Failed to add background music: {e}", exc_info=True)
         return video_clip
 
+def cleanup_workspace():
+    """
+    Deletes temporary directories and files used during generation.
+    Targets: output/temp/, output/frames_*/, temp/, output/audio_*.mp3
+    """
+    logger.info("Starting workspace cleanup...")
+    
+    # 1. Directories to remove
+    dirs_to_clean = [
+        os.path.join("output", "temp"),
+        os.path.join("output", "frames_web"),
+        os.path.join("output", "frames_listening"),
+        os.path.join("output", "frames_reading"),
+        "temp"
+    ]
+    
+    for d in dirs_to_clean:
+        if os.path.exists(d):
+            try:
+                shutil.rmtree(d, ignore_errors=True)
+                # logger.info(f"Removed directory: {d}")
+            except Exception as e:
+                logger.warning(f"Failed to remove {d}: {e}")
+                
+    # 2. Files to remove (audio_*.mp3 in output/)
+    output_dir = "output"
+    if os.path.exists(output_dir):
+        files = os.listdir(output_dir)
+        for f in files:
+            # Pattern: audio_*.mp3
+            if f.startswith("audio_") and f.endswith(".mp3"):
+                file_path = os.path.join(output_dir, f)
+                try:
+                    os.remove(file_path)
+                    # logger.info(f"Removed file: {f}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove {file_path}: {e}")
+
 def create_title_card(text):
     """
     Creates the title card for the Web Video.
@@ -903,6 +942,57 @@ def create_title_card(text):
     # Color: Black/Dark Grey
     draw.multiline_text((x, y), wrapped_text, font=font, fill="#333333", align="center")
     
+    img.save(output_path)
+    return output_path
+
+def create_social_title_img(text):
+    """
+    Creates a transparent overlay with the lesson title for Social Video.
+    Style: White text, Black outline, Centered, Y=1100.
+    """
+    st.info("Creating Social Title Overlay...")
+    output_path = os.path.join("output", "temp", "social_title_overlay.png")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    # 1. Canvas (Transparent)
+    width, height = 1080, 1920
+    img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # 2. Font (Large & Bold)
+    font_path = config['settings'].get('font_path', 'arial.ttf')
+    font_size = 90
+    try:
+        font = ImageFont.truetype(font_path, font_size)
+    except:
+        font = ImageFont.load_default()
+
+    # 3. Wrap Text (Safety)
+    avg_char_width = font_size * 0.5
+    chars_per_line = int((width * 0.9) / avg_char_width)
+    wrapper = textwrap.TextWrapper(width=chars_per_line)
+    wrapped_text = wrapper.fill(text)
+
+    # 4. Position & Draw
+    # Calculate text size
+    left, top, right, bottom = draw.textbbox((0, 0), wrapped_text, font=font, align="center")
+    text_w = right - left
+    text_h = bottom - top
+
+    x = (width - text_w) // 2
+    y = 1100  # Approx 60% down
+
+    # Draw with Stroke (Outline)
+    draw.multiline_text(
+        (x, y), 
+        wrapped_text, 
+        font=font, 
+        fill="white", 
+        align="center",
+        stroke_width=6,
+        stroke_fill="black"
+    )
+
     img.save(output_path)
     return output_path
 
@@ -1081,6 +1171,19 @@ def generate_video(parsed_script):
         else:
             st.info("Skipping Background Music (Optional).")
 
+        # F.5 Title Overlay (Social Flash)
+        update_status(0.57, "Adding Title Overlay...")
+        lesson_title = st.session_state.get('lesson_title', "Lesson")
+        social_title_path = create_social_title_img(lesson_title)
+        
+        if os.path.exists(social_title_path):
+            try:
+                title_overlay = ImageClip(social_title_path).with_duration(1.0).with_start(0)
+                final_combined = CompositeVideoClip([final_combined, title_overlay])
+                st.info("Title Overlay Applied.")
+            except Exception as e:
+                st.warning(f"Failed to apply Title Overlay: {e}")
+
         # G. Export
         update_status(0.58, "Exporting Social Video...")
         final_output_path = os.path.abspath(os.path.join("output", "final_video_complete.mp4"))
@@ -1179,6 +1282,15 @@ def generate_video(parsed_script):
     else:
         update_status(1.0, "Process Finished!")
 
+    # --- Cleanup ---
+    if not config.get('debug_mode', False):
+        cleanup_workspace()
+        st.toast("🧹 Temporary files cleaned up.")
+        logger.info("Temporary files cleaned up.")
+    else:
+        st.toast("🐛 Debug Mode ON: Temporary files preserved.")
+        logger.info("Debug Mode ON: Temporary files preserved.")
+
 # --- Streamlit UI ---
 
 def main():
@@ -1189,6 +1301,7 @@ def main():
     
     # 0. Global Settings
     debug_mode = st.sidebar.checkbox("Debug Mode", value=False)
+    config['debug_mode'] = debug_mode
     setup_logging(debug_mode)
     if debug_mode:
         st.sidebar.warning("Debug Mode Enabled: detailed logs in app.log")
