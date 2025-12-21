@@ -774,15 +774,18 @@ def create_social_title_img(text: str, config: Dict[str, Any]) -> str:
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     width, height = 1080, 1920
+    logger.info("Creating Image object...")
     img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     settings = config.get('settings', {})
     font_path = settings.get('font_path', 'arial.ttf')
     font_size = 90
+    logger.info(f"Loading font {font_path}...")
     try:
         font = ImageFont.truetype(font_path, font_size)
     except:
+        logger.warning("Font load failed, using default.")
         font = ImageFont.load_default()
 
     avg_char_width = font_size * 0.5
@@ -797,6 +800,7 @@ def create_social_title_img(text: str, config: Dict[str, Any]) -> str:
     x = (width - text_w) // 2
     y = 1100
 
+    logger.info("Drawing multiline text...")
     draw.multiline_text(
         (x, y), 
         wrapped_text, 
@@ -807,5 +811,12 @@ def create_social_title_img(text: str, config: Dict[str, Any]) -> str:
         stroke_fill="black"
     )
 
-    img.save(output_path)
+    logger.info(f"Saving Social Title Overlay to {output_path}...")
+    try:
+        img.save(output_path)
+        logger.info("Image saved successfully.")
+    except Exception as e:
+        logger.error(f"Failed to save Social Title Overlay: {e}")
+        raise e
+        
     return output_path

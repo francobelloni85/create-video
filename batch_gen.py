@@ -123,6 +123,14 @@ def main():
                 final_web.write_videofile(web_output_path, codec="libx264", audio_codec="aac", logger=None)
                 logger.info(f"[{filename}] Web Video exported: {web_output_path}")
                 
+                # Cleanup Web Clips
+                try:
+                    final_web.close()
+                    for clip in final_web_clips:
+                        clip.close()
+                except Exception as e:
+                    logger.warning(f"Error closing web clips: {e}")
+                    
             else:
                 logger.error(f"[{filename}] Failed to assemble Web Video story.")
 
@@ -231,6 +239,18 @@ def main():
                 social_output_path = os.path.abspath(os.path.join(output_dir, f"{lesson_id}.mp4"))
                 final_social.write_videofile(social_output_path, codec="libx264", audio_codec="aac", logger=None)
                 logger.info(f"[{filename}] Social Video exported: {social_output_path}")
+
+                # Cleanup Social Clips
+                try:
+                    final_social.close()
+                    # Also close the sub-clips in the list
+                    for clip in final_social_clips:
+                        clip.close()
+                    # Explicitly close overlay if it exists (it's in the composite, but good to be sure)
+                    if 'overlay' in locals(): overlay.close()
+                    if 'title_overlay' in locals(): title_overlay.close()
+                except Exception as e:
+                    logger.warning(f"Error closing social clips: {e}")
             
             logger.info(f"[{filename}] Done.")
             
