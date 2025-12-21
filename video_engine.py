@@ -516,12 +516,18 @@ def generate_frames(parsed_script: List[Dict[str, Any]], roster: List[str], conf
 
     return parsed_script
 
-def assemble_video(parsed_script: List[Dict[str, Any]], output_dir: str = "output", output_filename: str = "final_video.mp4", progress_callback: Optional[Callable[[float], None]] = None) -> Optional[str]:
+def assemble_video(parsed_script: List[Dict[str, Any]], output_dir: str = "output", output_filename: str = "final_video.mp4", progress_callback: Optional[Callable[[float], None]] = None, config: Dict[str, Any] = None) -> Optional[str]:
     """
     4. Assembly Logic
     Combines frames and audio into video segments, then concatenates them.
     """
     logger.info("Starting video assembly...")
+    
+    if config is None:
+        config = load_config()
+
+    video_codec = config.get('settings', {}).get('video_codec', 'libx264')
+    logger.info(f"Using Video Codec: {video_codec}")
     
     temp_dir = os.path.join(output_dir, "temp")
     os.makedirs(temp_dir, exist_ok=True)
@@ -551,9 +557,9 @@ def assemble_video(parsed_script: List[Dict[str, Any]], output_dir: str = "outpu
                 input_image, 
                 input_audio, 
                 segment_path, 
-                vcodec='libx264', 
-                acodec='aac', 
-                pix_fmt='yuv420p', 
+                vcodec='libx264',
+                acodec='aac',
+                pix_fmt='yuv420p',
                 shortest=None,
                 tune='stillimage'
             )
@@ -752,7 +758,7 @@ def create_title_card(text: str, config: Dict[str, Any]) -> str:
     text_h = bottom - top
     
     x = (target_size[0] - text_w) // 2
-    y = (target_size[1] - text_h) // 2
+    y = ((target_size[1] - text_h) // 2) + 40
     
     draw.multiline_text((x, y), wrapped_text, font=font, fill="#333333", align="center")
     

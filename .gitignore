@@ -2,3 +2,6 @@
 /service_account.json
 /__pycache__
 /assets/mp3
+/output
+/input_lessons
+app.log

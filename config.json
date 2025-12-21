@@ -5,7 +5,8 @@
     "balloon_image": "assets/balloon.png",
     "font_path": "arial.ttf",
     "text_color": "#000000",
-    "font_size": 50
+    "font_size": 50,
+    "video_codec": "h264_nvenc"
   },
   "narrator": {
     "voice_params": {

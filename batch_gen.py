@@ -183,6 +183,8 @@ def main():
             # Intro
             if os.path.exists("assets/intro.mp4"):
                 intro = VideoFileClip("assets/intro.mp4").resized(new_size=(1080, 1920))
+                if intro.duration > 1:
+                    intro = intro.subclipped(0, intro.duration - 0.3)
                 final_social_clips.append(intro)
                 
             # Listening

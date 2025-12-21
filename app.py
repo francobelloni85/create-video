@@ -134,6 +134,16 @@ def main():
         if st.button("Generate Video"):
             # --- START GENERATION ORCHESTRATION ---
             
+
+            
+            # Get Codec Settings
+            video_codec = config.get('settings', {}).get('video_codec', 'libx264')
+            write_kwargs = {"codec": video_codec, "audio_codec": "aac", "logger": None}
+            
+            # Safety Check for Hardware Encoders
+            if video_codec != "libx264":
+                write_kwargs["preset"] = "p4"
+
             # --- A. SOCIAL VIDEO (Complex Sequence) ---
             st.subheader("Generating Social Video...")
             social_script = copy.deepcopy(st.session_state.script_social)
@@ -168,7 +178,8 @@ def main():
                 listening_video_path = video_engine.assemble_video(
                     listening_script, 
                     output_dir="output", 
-                    output_filename="listening_part.mp4"
+                    output_filename="listening_part.mp4",
+                    config=config
                 )
                 
                 # 4. Reading Part (Normal)
@@ -182,7 +193,8 @@ def main():
                 reading_video_path = video_engine.assemble_video(
                     social_script,
                     output_dir="output",
-                    output_filename="reading_part.mp4"
+                    output_filename="reading_part.mp4",
+                    config=config
                 )
                 
                 # 5. Final Composition (APP Logic)
@@ -193,6 +205,8 @@ def main():
                 # Intro
                 if os.path.exists("assets/intro.mp4"):
                     intro = VideoFileClip("assets/intro.mp4").resized(new_size=(1080, 1920))
+                    if intro.duration > 1:
+                        intro = intro.subclipped(0, intro.duration - 0.3)
                     final_clips.append(intro)
                 
                 # Listening
@@ -238,7 +252,8 @@ def main():
                     # Export
                     update_status_callback(0.55, "Social: Exporting MP4...")
                     social_output_path = os.path.abspath(os.path.join("output", "final_video_complete.mp4"))
-                    final_combined.write_videofile(social_output_path, codec="libx264", audio_codec="aac", logger=None)
+
+                    final_combined.write_videofile(social_output_path, **write_kwargs)
                     
                     st.success("Social Video Generated!")
                     st.video(social_output_path)
@@ -278,7 +293,8 @@ def main():
                 story_path = video_engine.assemble_video(
                     web_script,
                     output_dir="output",
-                    output_filename="temp_web_story.mp4"
+                    output_filename="temp_web_story.mp4",
+                    config=config
                 )
                 
                 if story_path:
@@ -296,7 +312,8 @@ def main():
                     # Export
                     update_status_callback(0.95, "Web: Exporting MP4...")
                     web_output_path = os.path.abspath(os.path.join("output", "Web_Video.mp4"))
-                    final_web.write_videofile(web_output_path, codec="libx264", audio_codec="aac", logger=None)
+
+                    final_web.write_videofile(web_output_path, **write_kwargs)
                     
                     st.success("Web Video Generated!")
                     st.video(web_output_path)
