@@ -16,6 +16,7 @@ from mutagen.mp3 import MP3
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
 from bs4 import BeautifulSoup
 import ffmpeg
+import imageio_ffmpeg
 from moviepy import ImageClip, CompositeVideoClip, AudioFileClip, CompositeAudioClip
 from moviepy.audio.fx import AudioLoop, AudioFadeOut
 
@@ -81,7 +82,22 @@ def resolve_character_key(name: str, config: Dict[str, Any]) -> Optional[str]:
     """
     Robustly resolves a character name from the script to a key in config.json.
     """
-    if not name or name == "Narrator":
+    if not name:
+        return None
+        
+    abbrev_map = {
+        "H": "Herbert",
+        "B": "Brian",
+        "M": "Margot",
+        "L": "Laura",
+        "MO": "Molly",
+        "NAR": "Narrator"
+    }
+    
+    if name.upper() in abbrev_map:
+        name = abbrev_map[name.upper()]
+
+    if name == "Narrator":
         return None
 
     valid_keys = config.get('characters', {}).keys()
@@ -158,6 +174,93 @@ def extract_vocabulary(soup: BeautifulSoup) -> List[Dict[str, str]]:
             })
             
     return vocab_list
+
+def parse_json_lesson(data: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]], str, str]:
+    """
+    Parses a JSON lesson to extract the first word's dialogue as the script.
+    """
+    lesson_title = data.get("title", "Untitled Lesson")
+    
+    vocab_raw = data.get("vocabulary", [])
+    vocab_list = []
+    script = []
+    background_id = "living_room"
+    
+    for item in vocab_raw:
+        vocab_list.append({
+            "word": item.get("word", ""),
+            "translation": item.get("translation", ""),
+            "example": item.get("examples", [{}])[0].get("sentence", "") if item.get("examples") else "" 
+        })
+        
+    if vocab_raw:
+        first_word = vocab_raw[0]
+        
+        ctx = first_word.get("story_context")
+        if ctx and ctx.get("background_id"):
+            background_id = ctx.get("background_id")
+            
+        dialogue_raw = first_word.get("dialogue", [])
+        for line in dialogue_raw:
+            script.append({
+                "speaker": line.get("character", "Narrator"),
+                "text": line.get("text_en", "")
+            })
+            
+    return script, vocab_list, lesson_title, background_id
+
+def extract_scene_vocabulary(script: List[Dict[str, Any]], main_word_item: Dict[str, str], config: Dict[str, Any]) -> List[Dict[str, str]]:
+    """
+    Uses Gemini to extract 4 contextual words from the specific dialogue and appends them to the main word.
+    Expects standard A1/A2 English words.
+    """
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        logger.error("GEMINI_API_KEY not found in environment variables.")
+        return [main_word_item]
+
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(config.get('gemini_model', 'gemini-pro'))
+        
+        # reconstruct text
+        dialogue_text = "\n".join([f"{line.get('speaker', 'Narrator')}: {line.get('text', '')}" for line in script])
+        main_word = main_word_item.get("word", "")
+        
+        prompt = f"""
+        You are an English teacher for Italian beginners (A1 level).
+        Here is a short dialogue:
+        {dialogue_text}
+        
+        The main vocabulary word for this lesson is "{main_word}".
+        Please extract exactly 4 OTHER simple, fundamental A1-level English words that actually appear in the dialogue above.
+        
+        Return exactly 4 words with their Italian translation. 
+        Format the output as a clean JSON array of objects, with keys 'word' and 'translation'.
+        Do NOT enclose it in markdown blocks, just return raw JSON array.
+        Example:
+        [
+            {{"word": "apple", "translation": "mela"}},
+            {{"word": "box", "translation": "scatola"}}
+        ]
+        """
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+        if text.startswith("```json"): text = text[7:]
+        if text.startswith("```"): text = text[3:]
+        if text.endswith("```"): text = text[:-3]
+        
+        try:
+             extracted_words = json.loads(text)
+             # return main word + the 4 extracted
+             return [main_word_item] + extracted_words[:4]
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON Error in extract_scene_vocabulary: {e}\nRaw output: {text}")
+            return [main_word_item]
+    except Exception as e:
+        logger.error(f"Error extracting scene vocabulary: {e}", exc_info=True)
+        return [main_word_item]
+
 
 def clean_html_content(raw_html: str) -> Tuple[str, List[Dict[str, str]], str]:
     """
@@ -374,7 +477,7 @@ def generate_audio(parsed_script: List[Dict[str, Any]], config: Dict[str, Any], 
             
     return updated_script
 
-def generate_frames(parsed_script: List[Dict[str, Any]], roster: List[str], config: Dict[str, Any], output_dir: str = "output", progress_callback: Optional[Callable[[float], None]] = None) -> List[Dict[str, Any]]:
+def generate_frames(parsed_script: List[Dict[str, Any]], roster: List[str], config: Dict[str, Any], output_dir: str = "output", progress_callback: Optional[Callable[[float], None]] = None, background_id: str = "living_room") -> List[Dict[str, Any]]:
     """
     3. Visual Generation Logic (Vertical Ensemble)
     """
@@ -386,6 +489,16 @@ def generate_frames(parsed_script: List[Dict[str, Any]], roster: List[str], conf
     video_height = 1920
     settings = config.get('settings', {})
     bg_color = settings.get('background_color', '#FFFFFF')
+    
+    # Load Background
+    bg_image = None
+    bg_path = f"assets/background/{background_id}.png"
+    if os.path.exists(bg_path):
+        try:
+            bg_image = Image.open(bg_path).convert("RGBA")
+            bg_image = ImageOps.fit(bg_image, (video_width, video_height), method=Image.Resampling.LANCZOS)
+        except Exception as e:
+            logger.warning(f"Could not load background {bg_path}: {e}")
     
     # Load Font
     font_path = settings.get('font_path', 'arial.ttf')
@@ -443,7 +556,10 @@ def generate_frames(parsed_script: List[Dict[str, Any]], roster: List[str], conf
         speaker = line.get('speaker')
         text_content = line.get('text', "")
         
-        frame = Image.new('RGBA', (video_width, video_height), bg_color)
+        if bg_image:
+            frame = bg_image.copy()
+        else:
+            frame = Image.new('RGBA', (video_width, video_height), bg_color)
         
         # --- Stage Layer ---
         num_chars = len(roster)
@@ -564,7 +680,7 @@ def assemble_video(parsed_script: List[Dict[str, Any]], output_dir: str = "outpu
                 tune='stillimage'
             )
             
-            stream.run(overwrite_output=True, quiet=True)
+            stream.run(cmd=imageio_ffmpeg.get_ffmpeg_exe(), overwrite_output=True, quiet=True)
             segment_files.append(segment_path)
             
         except ffmpeg.Error as e:
@@ -596,7 +712,7 @@ def assemble_video(parsed_script: List[Dict[str, Any]], output_dir: str = "outpu
             ffmpeg
             .input(list_path, format='concat', safe=0)
             .output(final_output, c='copy')
-            .run(overwrite_output=True, quiet=True)
+            .run(cmd=imageio_ffmpeg.get_ffmpeg_exe(), overwrite_output=True, quiet=True)
         )
         
         return final_output

@@ -47,9 +47,9 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     
     # 2. File Loop
-    files = glob.glob(os.path.join(input_dir, "*.txt"))
+    files = glob.glob(os.path.join(input_dir, "*.json"))
     if not files:
-        logger.warning(f"No .txt files found in {input_dir}. Please add some lesson files.")
+        logger.warning(f"No .json files found in {input_dir}. Please add some lesson files.")
         return
 
     logger.info(f"Found {len(files)} files to process.")
@@ -65,15 +65,17 @@ def main():
             
             # Read Content
             with open(file_path, 'r', encoding='utf-8') as f:
-                raw_html = f.read()
+                import json
+                raw_json = json.load(f)
             
             # Parse
-            logger.info(f"[{filename}] Cleaning HTML content...")
-            cleaned_text, vocab_list, lesson_title = video_engine.clean_html_content(raw_html)
+            logger.info(f"[{filename}] Parsing JSON content...")
+            web_script, vocab_list, lesson_title, background_id = video_engine.parse_json_lesson(raw_json)
             
-            logger.info(f"[{filename}] Generating scripts (Web & Social)...")
-            social_script_dummy, web_script = video_engine.generate_dual_scripts(cleaned_text, config)
-            
+            if vocab_list:
+                logger.info(f"[{filename}] Extracting words from scene...")
+                vocab_list = video_engine.extract_scene_vocabulary(web_script, vocab_list[0], config)
+
             if not web_script:
                 logger.error(f"[{filename}] Failed to generate scripts. Skipping.")
                 continue
@@ -97,7 +99,8 @@ def main():
             # 3. Frames
             video_engine.generate_frames(
                 script_web, web_roster, config,
-                output_dir=web_frames_dir
+                output_dir=web_frames_dir,
+                background_id=background_id
             )
             
             # 4. Assemble Story
@@ -164,7 +167,8 @@ def main():
                 
             video_engine.generate_frames(
                 listening_script, social_roster, config,
-                output_dir=os.path.join("output", "frames_listening")
+                output_dir=os.path.join("output", "frames_listening"),
+                background_id=background_id
             )
             
             listening_video_path = video_engine.assemble_video(
@@ -176,7 +180,8 @@ def main():
             # 2. Reading Part (Normal)
             video_engine.generate_frames(
                 script_social, social_roster, config,
-                output_dir=os.path.join("output", "frames_reading")
+                output_dir=os.path.join("output", "frames_reading"),
+                background_id=background_id
             )
             
             reading_video_path = video_engine.assemble_video(

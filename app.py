@@ -52,28 +52,34 @@ def main():
             status_text.text(text)
         main_progress.progress(progress)
 
-    # 1. HTML Input
-    raw_html = st.text_area("Paste Lesson HTML", height=300, placeholder="Paste the full lesson HTML code here...")
+    # 1. JSON Input
+    raw_json_str = st.text_area("Paste Lesson JSON", height=300, placeholder="Paste the full lesson JSON code here...")
 
-    # Button: Clean
-    if st.button("Clean & Preview Text"):
-        with st.spinner("Cleaning HTML..."):
-            cleaned_text, vocab_list, lesson_title = video_engine.clean_html_content(raw_html)
-            
-            # Update Session State
-            st.session_state.cleaned_text_preview = cleaned_text
-            st.session_state.cleaned_text_preview_widget = cleaned_text
-            st.session_state.original_clean_text = cleaned_text
-            st.session_state.vocab_list = vocab_list
-            st.session_state.lesson_title = lesson_title
-            
-            st.write(f"**Lesson Title:** {lesson_title}")
-            if vocab_list:
-                st.success(f"Extracted {len(vocab_list)} extracted vocabulary items.")
+    # Button: Parse
+    if st.button("Parse Lesson"):
+        with st.spinner("Parsing JSON..."):
+            try:
+                import json
+                raw_json = json.loads(raw_json_str)
+                web_script, vocab_list, lesson_title, background_id = video_engine.parse_json_lesson(raw_json)
+                
+                if vocab_list:
+                    st.info("Extracting words from scene...")
+                    vocab_list = video_engine.extract_scene_vocabulary(web_script, vocab_list[0], config)
 
-    # 2. Preview & Generate Script
-    if 'cleaned_text_preview' in st.session_state and st.session_state.cleaned_text_preview:
-        
+                # Update Session State
+                st.session_state.script_web = web_script
+                st.session_state.script_social = web_script[:6]
+                st.session_state.vocab_list = vocab_list
+                st.session_state.lesson_title = lesson_title
+                st.session_state.background_id = background_id
+                
+                st.success(f"Parsed. Title: {lesson_title}. Background: {background_id}")
+            except Exception as e:
+                st.error(f"Failed to parse JSON: {e}")
+
+    # 2. Preview & Edit Script
+    if 'script_web' in st.session_state:
         # Vocab Editor
         if 'vocab_list' in st.session_state and st.session_state.vocab_list:
             st.subheader("Extracted Vocabulary")
@@ -84,44 +90,18 @@ def main():
             )
             st.session_state.vocab_list = edited_vocab
             st.write("---")
-        
-        st.subheader("Cleaned English Text")
-        final_script_text = st.text_area(
-            "Verify & Edit Text", 
-            key='cleaned_text_preview_widget', 
-            value=st.session_state.cleaned_text_preview,
-            height=200
-        )
-        
-        # Generate Scripts Button
-        st.write("---")
-        if st.button("Step 2: Generate Web Script"):
-            source_text = st.session_state.get('original_clean_text', final_script_text)
-            
-            with st.spinner("Generating Web Script..."):
-                social, web = video_engine.generate_dual_scripts(source_text, config)
-                
-                if web:
-                    st.session_state.script_web = web
-                    # Auto-derive Social Script (First 6 lines)
-                    st.session_state.script_social = web[:6]
-                    st.success("Web Script & Social Teaser Generated!")
-                else:
-                    st.error("Failed to generate scripts.")
 
-        # Script Editors
-        if 'script_web' in st.session_state:
-            st.subheader("Script Editor (Full Story)")
-            edited_web = st.data_editor(
-                st.session_state.script_web, 
-                num_rows="dynamic", 
-                key='web_editor',
-                use_container_width=True
-            )
-            st.session_state.script_web = edited_web
-            
-            # Sync Social Script
-            st.session_state.script_social = edited_web[:6]
+        st.subheader("Script Editor")
+        edited_web = st.data_editor(
+            st.session_state.script_web, 
+            num_rows="dynamic", 
+            key='web_editor',
+            width='stretch'
+        )
+        st.session_state.script_web = edited_web
+        
+        # Sync Social Script
+        st.session_state.script_social = edited_web[:6]
 
     # 3. Create Video
     if 'script_web' in st.session_state:
@@ -172,7 +152,8 @@ def main():
                 video_engine.generate_frames(
                     listening_script, roster, config, 
                     output_dir="output/frames_listening",
-                    progress_callback=lambda p: update_status_callback(0.20 + (p * 0.1))
+                    progress_callback=lambda p: update_status_callback(0.20 + (p * 0.1)),
+                    background_id=st.session_state.get('background_id', 'living_room')
                 )
                 
                 listening_video_path = video_engine.assemble_video(
@@ -187,7 +168,8 @@ def main():
                 video_engine.generate_frames(
                     social_script, roster, config,
                     output_dir="output/frames_reading",
-                    progress_callback=lambda p: update_status_callback(0.35 + (p * 0.1))
+                    progress_callback=lambda p: update_status_callback(0.35 + (p * 0.1)),
+                    background_id=st.session_state.get('background_id', 'living_room')
                 )
                 
                 reading_video_path = video_engine.assemble_video(
@@ -286,7 +268,8 @@ def main():
                 video_engine.generate_frames(
                     web_script, web_roster, config,
                     output_dir="output/frames_web",
-                    progress_callback=lambda p: update_status_callback(0.75 + (p * 0.1))
+                    progress_callback=lambda p: update_status_callback(0.75 + (p * 0.1)),
+                    background_id=st.session_state.get('background_id', 'living_room')
                 )
                 
                 # 4. Assemble Story

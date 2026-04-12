@@ -1,12 +1,12 @@
 {
-  "gemini_model": "gemini-2.0-flash-exp",
+  "gemini_model": "gemini-2.5-flash",
   "settings": {
     "background_color": "#FFFFFF",
     "balloon_image": "assets/balloon.png",
     "font_path": "arial.ttf",
     "text_color": "#000000",
     "font_size": 50,
-    "video_codec": "h264_nvenc"
+    "video_codec": "libx264"
   },
   "narrator": {
     "voice_params": {
